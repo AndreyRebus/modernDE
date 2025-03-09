@@ -1,22 +1,3 @@
-#
-# Licensed to the Apache Software Foundation (ASF) under one
-# or more contributor license agreements.  See the NOTICE file
-# distributed with this work for additional information
-# regarding copyright ownership.  The ASF licenses this file
-# to you under the Apache License, Version 2.0 (the
-# "License"); you may not use this file except in compliance
-# with the License.  You may obtain a copy of the License at
-#
-#   http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing,
-# software distributed under the License is distributed on an
-# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-# KIND, either express or implied.  See the License for the
-# specific language governing permissions and limitations
-# under the License.
-#
-
 services:
   polaris:
     image: apache/polaris:latest
@@ -24,13 +5,13 @@ services:
       - "8181:8181"
       - "8182"
     environment:
-      AWS_REGION: us-west-2
-      AWS_ACCESS_KEY_ID: $AWS_ACCESS_KEY_ID
-      AWS_SECRET_ACCESS_KEY: $AWS_SECRET_ACCESS_KEY
-      GOOGLE_APPLICATION_CREDENTIALS: $GOOGLE_APPLICATION_CREDENTIALS
-      AZURE_TENANT_ID: $AZURE_TENANT_ID
-      AZURE_CLIENT_ID: $AZURE_CLIENT_ID
-      AZURE_CLIENT_SECRET: $AZURE_CLIENT_SECRET
+      AWS_REGION: ru-central1
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      polaris.storage.s3.bucket: "test-s3test"
+      polaris.storage.s3.endpoint: "https://storage.yandexcloud.net"
+      polaris.storage.s3.path-style-access: "true"
+      polaris.storage.s3.region: "ru-central1"
       POLARIS_BOOTSTRAP_CREDENTIALS: default-realm,root,s3cr3t
       polaris.realm-context.realms: default-realm
       quarkus.otel.sdk.disabled: "true"
@@ -56,3 +37,7 @@ services:
       - "8080:8080"
     volumes:
       - ./trino-config/catalog:/etc/trino/catalog
+    environment:
+      AWS_ACCESS_KEY_ID: $AWS_ACCESS_KEY_ID
+      AWS_SECRET_ACCESS_KEY: $AWS_SECRET_ACCESS_KEY
+      TRINO_LOG_LEVEL: INFO
