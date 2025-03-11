@@ -5,16 +5,17 @@ services:
       - "8181:8181"
       - "8182"
     environment:
-      AWS_REGION: ru-central1
-      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
-      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
-      polaris.storage.s3.bucket: "test-s3test"
-      polaris.storage.s3.endpoint: "https://storage.yandexcloud.net"
-      polaris.storage.s3.path-style-access: "true"
-      polaris.storage.s3.region: "ru-central1"
       POLARIS_BOOTSTRAP_CREDENTIALS: default-realm,root,s3cr3t
       polaris.realm-context.realms: default-realm
       quarkus.otel.sdk.disabled: "true"
+
+      POLARIS_STORAGE_TYPE: S3
+      POLARIS_S3_BUCKET: test-s3test
+      POLARIS_S3_ENDPOINT: https://storage.yandexcloud.net
+      POLARIS_S3_ACCESS_KEY: YCAJExz5vm-sE9r_95JbsXcir
+      POLARIS_S3_SECRET_KEY: YCN0qHEGV4-9vYQ5BqY7ZpoSdnmoqhyBR5YPivcV
+      POLARIS_S3_PATH_STYLE_ACCESS: "true"
+
 
     healthcheck:
       test: ["CMD", "curl", "http://localhost:8182/healthcheck"]

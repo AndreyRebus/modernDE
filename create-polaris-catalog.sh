@@ -35,38 +35,38 @@ fi
 
 PRINCIPAL_TOKEN=$token
 
-curl -X POST "http://polaris:8181/api/v1/catalogs" \
-    -H "Content-Type: application/json" \
-    -d '{
-        "name": "yandex_catalog",
-        "type": "ICEBERG",
-        "storage_config": {
-            "type": "S3",
-            "bucket": "my-yandex-bucket",
-            "endpoint": "https://storage.yandexcloud.net"
-        }
-    }'
-
-
-# # Use local filesystem by default
-# curl -i -X POST -H "Authorization: Bearer $PRINCIPAL_TOKEN" -H 'Accept: application/json' -H 'Content-Type: application/json' \
-#   http://polaris:8181/api/management/v1/catalogs \
-#   -d '{
-#         "catalog": {
-#           "name": "polaris",
-#           "type": "INTERNAL",
-#           "readOnly": false,
-#           "properties": {
-#             "default-base-location": "file:///tmp/polaris/"
-#           },
-#           "storageConfigInfo": {
-#             "storageType": "FILE",
-#             "allowedLocations": [
-#               "file:///tmp"
-#             ]
-#           }
+# curl -X POST "http://polaris:8181/api/v1/catalogs" \
+#     -H "Content-Type: application/json" \
+#     -d '{
+#         "name": "yandex_catalog",
+#         "type": "ICEBERG",
+#         "storage_config": {
+#             "type": "S3",
+#             "bucket": "test-s3test",
+#             "endpoint": "https://storage.yandexcloud.net"
 #         }
-#       }'
+#     }'
+
+
+# Use local filesystem by default
+curl -i -X POST -H "Authorization: Bearer $PRINCIPAL_TOKEN" -H 'Accept: application/json' -H 'Content-Type: application/json' \
+  http://polaris:8181/api/management/v1/catalogs \
+  -d '{
+        "catalog": {
+          "name": "polaris",
+          "type": "INTERNAL",
+          "readOnly": false,
+          "properties": {
+            "default-base-location": "file:///tmp/polaris/"
+          },
+          "storageConfigInfo": {
+            "storageType": "FILE",
+            "allowedLocations": [
+              "file:///tmp"
+            ]
+          }
+        }
+      }'
 
 # Add TABLE_WRITE_DATA to the catalog's catalog_admin role since by default it can only manage access and metadata
 curl -i -X PUT -H "Authorization: Bearer $PRINCIPAL_TOKEN" -H 'Accept: application/json' -H 'Content-Type: application/json' \
