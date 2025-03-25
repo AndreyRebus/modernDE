@@ -1,44 +1,41 @@
+version: '3'
+
 services:
-  polaris:
-    image: apache/polaris:latest
+
+  controller:
+    image: 'trinodb/trino'
+    hostname: trino
+    volumes:
+      - ./etc/catalog:/etc/trino/catalog
     ports:
-      - "8181:8181"
-      - "8182"
-    environment:
-      POLARIS_BOOTSTRAP_CREDENTIALS: default-realm,root,s3cr3t
-      polaris.realm-context.realms: default-realm
-      quarkus.otel.sdk.disabled: "true"
-
-      POLARIS_STORAGE_TYPE: S3
-      POLARIS_S3_BUCKET: test-s3test
-      POLARIS_S3_ENDPOINT: https://storage.yandexcloud.net
-      POLARIS_S3_ACCESS_KEY: YCAJExz5vm-sE9r_95JbsXcir
-      POLARIS_S3_SECRET_KEY: YCN0qHEGV4-9vYQ5BqY7ZpoSdnmoqhyBR5YPivcV
-      POLARIS_S3_PATH_STYLE_ACCESS: "true"
-
-
-    healthcheck:
-      test: ["CMD", "curl", "http://localhost:8182/healthcheck"]
-      interval: 10s
-      timeout: 10s
-      retries: 5
-
-  create-polaris-catalog:
-    image: curlimages/curl
+      - '8080:8080'
     depends_on:
-      polaris:
+      postgres:
         condition: service_healthy
-    volumes:
-      - ./create-polaris-catalog.sh:/create-polaris-catalog.sh
-    command: ["/bin/sh", "/create-polaris-catalog.sh"]
+    networks:
+      - trino_network
 
-  trino:
-    image: trinodb/trino:latest
-    ports:
-      - "8080:8080"
-    volumes:
-      - ./trino-config/catalog:/etc/trino/catalog
+  postgres:
+    image: postgres:16
     environment:
-      AWS_ACCESS_KEY_ID: $AWS_ACCESS_KEY_ID
-      AWS_SECRET_ACCESS_KEY: $AWS_SECRET_ACCESS_KEY
-      TRINO_LOG_LEVEL: INFO
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - postgres-db-volume:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 10s
+      retries: 5
+      start_period: 5s
+    restart: always
+    networks:
+      - trino_network
+
+networks:
+  trino_network:
+    driver: bridge
+
+
+volumes:
+  postgres-db-volume: 
