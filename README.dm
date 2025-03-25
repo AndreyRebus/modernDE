@@ -1,0 +1,1 @@
+https://github.com/tschaub/trino-example/blob/main/iceberg-setup.sql создание мета каталога
