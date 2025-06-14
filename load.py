@@ -33,6 +33,13 @@ def fetch_matches_once_per_day(
     # ─── ключи AWS ───
     aws_access_key_id  = aws_access_key_id  or os.getenv("AWS_ACCESS_KEY_ID")
     aws_secret_access_key = aws_secret_access_key or os.getenv("AWS_SECRET_ACCESS_KEY")
+    bucket_name = bucket_name or os.getenv("S3_BUCKET_NAME", bucket_name)
+    trino_host = trino_host or os.getenv("TRINO_HOST", trino_host)
+    trino_port = int(os.getenv("TRINO_PORT", trino_port))
+    trino_user = trino_user or os.getenv("TRINO_USER", trino_user)
+    trino_catalog = trino_catalog or os.getenv("TRINO_CATALOG", trino_catalog)
+    trino_schema = trino_schema or os.getenv("TRINO_SCHEMA", trino_schema)
+    trino_table = trino_table or os.getenv("TRINO_TABLE", trino_table)
     if not (aws_access_key_id and aws_secret_access_key):
         raise ValueError("AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY не заданы.")
 
@@ -138,11 +145,8 @@ if __name__ == "__main__":
                     datetime.date(2025, 6, 10),
                     datetime.date(2025, 6, 11)):
             key = fetch_matches_once_per_day(
-                riot_id          = riot,
-                load_date        = day,
-                api_key          = "RGAPI-c2d86601-5f95-47b4-9f39-81b04f5deed8",
-                aws_access_key_id= "YCAJExz5vm-sE9r_95JbsXcir",
-                aws_secret_access_key="YCN0qHEGV4-9vYQ5BqY7ZpoSdnmoqhyBR5YPivcV",
+                riot_id   = riot,
+                load_date = day,
             )
             if key:
                 print(f"✅ Файл {key} успешно загружен и зарегистрирован!")
