@@ -2,6 +2,9 @@
 # pip install --upgrade requests pandas boto3 pyarrow trino
 
 import os, re, io, time, datetime, urllib.parse, requests, boto3
+from dotenv import load_dotenv
+
+load_dotenv()
 import pandas as pd
 from trino import dbapi
 
@@ -138,11 +141,8 @@ if __name__ == "__main__":
                     datetime.date(2025, 6, 10),
                     datetime.date(2025, 6, 11)):
             key = fetch_matches_once_per_day(
-                riot_id          = riot,
-                load_date        = day,
-                api_key          = "RGAPI-c2d86601-5f95-47b4-9f39-81b04f5deed8",
-                aws_access_key_id= "YCAJExz5vm-sE9r_95JbsXcir",
-                aws_secret_access_key="YCN0qHEGV4-9vYQ5BqY7ZpoSdnmoqhyBR5YPivcV",
+                riot_id   = riot,
+                load_date = day,
             )
             if key:
                 print(f"✅ Файл {key} успешно загружен и зарегистрирован!")
