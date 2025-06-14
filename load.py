@@ -4,6 +4,7 @@
 import os, re, io, time, datetime, urllib.parse, requests, boto3
 import pandas as pd
 from trino import dbapi
+from dotenv import load_dotenv
 
 
 def fetch_matches_once_per_day(
@@ -29,7 +30,7 @@ def fetch_matches_once_per_day(
     Выгружает матчи игрока за конкретную дату. Если файлы за этот день
     уже существуют в S3, пропускает работу и возвращает None.
     """
-
+    load_dotenv()
     # ─── ключи AWS ───
     aws_access_key_id  = aws_access_key_id  or os.getenv("AWS_ACCESS_KEY_ID")
     aws_secret_access_key = aws_secret_access_key or os.getenv("AWS_SECRET_ACCESS_KEY")
@@ -141,9 +142,8 @@ def fetch_matches_once_per_day(
 if __name__ == "__main__":
     import datetime
     for riot in ["Monty Gard#RU1", "Breaksthesilence#RU1"]:
-        for day in (datetime.date(2025, 6, 9),
-                    datetime.date(2025, 6, 10),
-                    datetime.date(2025, 6, 11)):
+        for day in (datetime.date(2025, 6, 6),
+                    datetime.date(2025, 6, 7)):
             key = fetch_matches_once_per_day(
                 riot_id   = riot,
                 load_date = day,

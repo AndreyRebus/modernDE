@@ -206,7 +206,8 @@ CREATE OR REPLACE TABLE iceberg.lol_raw.data_api_mining (
     "participant.visionWardsBoughtInGame"         BIGINT,
     "participant.wardsKilled"                     BIGINT,
     "participant.wardsPlaced"                     BIGINT,
-    "participant.win"                             BOOLEAN
+    "participant.win"                             BOOLEAN,
+    "source_nickname"                             VARCHAR     
 )
 WITH (
     format = 'PARQUET'
