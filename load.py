@@ -142,7 +142,7 @@ def fetch_matches_once_per_day(
 if __name__ == "__main__":
     import datetime
     for riot in ["Monty Gard#RU1", "Breaksthesilence#RU1"]:
-        for day in (datetime.date(2025, 6, 6),
+        for day in (datetime.date(2025, 6, 5),
                     datetime.date(2025, 6, 7)):
             key = fetch_matches_once_per_day(
                 riot_id   = riot,

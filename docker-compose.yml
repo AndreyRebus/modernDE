@@ -7,8 +7,12 @@ services:
     hostname: trino
     volumes:
       - ./etc/catalog:/etc/trino/catalog
+      - ./etc/config.properties:/etc/trino/config.properties
+      - ./etc/password-authenticator.properties:/etc/trino/password-authenticator.properties
+      - ./etc/password.db:/etc/trino/password.db
+      - ./etc/keystore.p12:/etc/trino/keystore.p12
     ports:
-      - '8080:8080'
+      - "8443:8443" 
     depends_on:
       postgres:
         condition: service_healthy
