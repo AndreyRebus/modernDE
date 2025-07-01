@@ -18,6 +18,7 @@ CREATE TABLE iceberg_tables (
 
 CREATE SCHEMA iceberg.lol_raw;
 
+CREATE SCHEMA iceberg.dbt_model;
 
 CREATE OR REPLACE TABLE iceberg.lol_raw.data_api_mining (
     -- ====== корневые метаданные матча =====================================
@@ -212,3 +213,4 @@ CREATE OR REPLACE TABLE iceberg.lol_raw.data_api_mining (
 WITH (
     format = 'PARQUET'
 );
+

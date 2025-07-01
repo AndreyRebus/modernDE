@@ -1,0 +1,312 @@
+version: 2
+sources:
+- name: lol_raw
+  schema: lol_raw
+  tables:
+  - name: data_api_mining
+    description: Данные об участниках матчей League of Legends, собранные с помощью майнинга API.
+    columns:
+    - name: 'Unnamed: 0'
+      description: Служебный индекс строки из исходного CSV
+    - name: metadata.matchId
+      description: Уникальный идентификатор матча
+    - name: info.gameCreation
+      description: Метка времени создания игры (мс с 1 января 1970)
+    - name: info.gameDuration
+      description: Длительность матча (секунды)
+    - name: info.gameMode
+      description: Режим игры (Classic, ARAM и др.)
+    - name: info.queueId
+      description: Идентификатор очереди матчмейкинга
+    - name: info.gameVersion
+      description: Версия клиента League of Legends
+    - name: participant.PlayerScore0
+      description: Показатель «Player Score0» игрока (уточнить)
+    - name: participant.PlayerScore1
+      description: Показатель «Player Score1» игрока (уточнить)
+    - name: participant.PlayerScore10
+      description: Показатель «Player Score10» игрока (уточнить)
+    - name: participant.PlayerScore11
+      description: Показатель «Player Score11» игрока (уточнить)
+    - name: participant.PlayerScore2
+      description: Показатель «Player Score2» игрока (уточнить)
+    - name: participant.PlayerScore3
+      description: Показатель «Player Score3» игрока (уточнить)
+    - name: participant.PlayerScore4
+      description: Показатель «Player Score4» игрока (уточнить)
+    - name: participant.PlayerScore5
+      description: Показатель «Player Score5» игрока (уточнить)
+    - name: participant.PlayerScore6
+      description: Показатель «Player Score6» игрока (уточнить)
+    - name: participant.PlayerScore7
+      description: Показатель «Player Score7» игрока (уточнить)
+    - name: participant.PlayerScore8
+      description: Показатель «Player Score8» игрока (уточнить)
+    - name: participant.PlayerScore9
+      description: Показатель «Player Score9» игрока (уточнить)
+    - name: participant.allInPings
+      description: Количество пингов типа «All In», отправленных игроком
+    - name: participant.assistMePings
+      description: Количество пингов типа «Assist Me», отправленных игроком
+    - name: participant.assists
+      description: Количество ассистов игрока
+    - name: participant.baronKills
+      description: Количество baron (убийств) игрока
+    - name: participant.basicPings
+      description: Количество пингов типа «Basic», отправленных игроком
+    - name: participant.challenges
+      description: Показатель «challenges» игрока (уточнить)
+    - name: participant.champExperience
+      description: Набранный опыт чемпиона
+    - name: participant.champLevel
+      description: Уровень чемпиона к концу игры
+    - name: participant.championId
+      description: ID выбранного чемпиона
+    - name: participant.championName
+      description: Название выбранного чемпиона
+    - name: participant.championSkinId
+      description: ID скина чемпиона
+    - name: participant.championTransform
+      description: Показатель «champion Transform» игрока (уточнить)
+    - name: participant.commandPings
+      description: Количество пингов типа «Command», отправленных игроком
+    - name: participant.consumablesPurchased
+      description: Показатель «consumables Purchased» игрока (уточнить)
+    - name: participant.damageDealtToBuildings
+      description: Показатель «damage Dealt To Buildings» игрока (уточнить)
+    - name: participant.damageDealtToObjectives
+      description: Показатель «damage Dealt To Objectives» игрока (уточнить)
+    - name: participant.damageDealtToTurrets
+      description: Показатель «damage Dealt To Turrets» игрока (уточнить)
+    - name: participant.damageSelfMitigated
+      description: Показатель «damage Self Mitigated» игрока (уточнить)
+    - name: participant.dangerPings
+      description: Количество пингов типа «Danger», отправленных игроком
+    - name: participant.deaths
+      description: Количество смертей игрока
+    - name: participant.detectorWardsPlaced
+      description: Показатель «detector Wards Placed» игрока (уточнить)
+    - name: participant.doubleKills
+      description: Количество double (убийств) игрока
+    - name: participant.dragonKills
+      description: Количество dragon (убийств) игрока
+    - name: participant.eligibleForProgression
+      description: Показатель «eligible For Progression» игрока (уточнить)
+    - name: participant.enemyMissingPings
+      description: Количество пингов типа «Enemy Missing», отправленных игроком
+    - name: participant.enemyVisionPings
+      description: Количество пингов типа «Enemy Vision», отправленных игроком
+    - name: participant.firstBloodAssist
+      description: 'Флаг: игрок ассистировал в первой крови'
+    - name: participant.firstBloodKill
+      description: 'Флаг: игрок совершил первую кровь'
+    - name: participant.firstTowerAssist
+      description: 'Флаг: игрок ассистировал при уроне первой башни'
+    - name: participant.firstTowerKill
+      description: 'Флаг: игрок уничтожил первую башню'
+    - name: participant.gameEndedInEarlySurrender
+      description: Показатель «game Ended In Early Surrender» игрока (уточнить)
+    - name: participant.gameEndedInSurrender
+      description: Показатель «game Ended In Surrender» игрока (уточнить)
+    - name: participant.getBackPings
+      description: Количество пингов типа «Get Back», отправленных игроком
+    - name: participant.goldEarned
+      description: Заработанное игроком золото
+    - name: participant.goldSpent
+      description: Потраченное игроком золото
+    - name: participant.holdPings
+      description: Количество пингов типа «Hold», отправленных игроком
+    - name: participant.individualPosition
+      description: Показатель «individual Position» игрока (уточнить)
+    - name: participant.inhibitorKills
+      description: Количество inhibitor (убийств) игрока
+    - name: participant.inhibitorTakedowns
+      description: Количество захватов/снос цели inhibitor
+    - name: participant.inhibitorsLost
+      description: Показатель «inhibitors Lost» игрока (уточнить)
+    - name: participant.item0
+      description: Показатель «item0» игрока (уточнить)
+    - name: participant.item1
+      description: Показатель «item1» игрока (уточнить)
+    - name: participant.item2
+      description: Показатель «item2» игрока (уточнить)
+    - name: participant.item3
+      description: Показатель «item3» игрока (уточнить)
+    - name: participant.item4
+      description: Показатель «item4» игрока (уточнить)
+    - name: participant.item5
+      description: Показатель «item5» игрока (уточнить)
+    - name: participant.item6
+      description: Показатель «item6» игрока (уточнить)
+    - name: participant.itemsPurchased
+      description: Показатель «items Purchased» игрока (уточнить)
+    - name: participant.killingSprees
+      description: Показатель «killing Sprees» игрока (уточнить)
+    - name: participant.kills
+      description: Количество убийств игрока
+    - name: participant.lane
+      description: Линия, на которой играл чемпион
+    - name: participant.largestCriticalStrike
+      description: Показатель «largest Critical Strike» игрока (уточнить)
+    - name: participant.largestKillingSpree
+      description: Показатель «largest Killing Spree» игрока (уточнить)
+    - name: participant.largestMultiKill
+      description: Показатель «largest Multi Kill» игрока (уточнить)
+    - name: participant.longestTimeSpentLiving
+      description: Показатель «longest Time Spent Living» игрока (уточнить)
+    - name: participant.magicDamageDealt
+      description: Magic damage урон, нанесённый игроком
+    - name: participant.magicDamageDealtToChampions
+      description: Magic damage d урон по чемпионам, нанесённый игроком
+    - name: participant.magicDamageTaken
+      description: Magic damage урон, полученный игроком
+    - name: participant.missions
+      description: Показатель «missions» игрока (уточнить)
+    - name: participant.needVisionPings
+      description: Количество пингов типа «Need Vision», отправленных игроком
+    - name: participant.neutralMinionsKilled
+      description: Показатель «neutral Minions Killed» игрока (уточнить)
+    - name: participant.nexusKills
+      description: Количество nexus (убийств) игрока
+    - name: participant.nexusLost
+      description: Показатель «nexus Lost» игрока (уточнить)
+    - name: participant.nexusTakedowns
+      description: Количество захватов/снос цели nexus
+    - name: participant.objectivesStolen
+      description: Показатель «objectives Stolen» игрока (уточнить)
+    - name: participant.objectivesStolenAssists
+      description: Показатель «objectives Stolen Assists» игрока (уточнить)
+    - name: participant.onMyWayPings
+      description: Количество пингов типа «On My Way», отправленных игроком
+    - name: participant.participantId
+      description: Показатель «participant Id» игрока (уточнить)
+    - name: participant.pentaKills
+      description: Количество penta (убийств) игрока
+    - name: participant.perks
+      description: Показатель «perks» игрока (уточнить)
+    - name: participant.physicalDamageDealt
+      description: Physical damage урон, нанесённый игроком
+    - name: participant.physicalDamageDealtToChampions
+      description: Physical damage d урон по чемпионам, нанесённый игроком
+    - name: participant.physicalDamageTaken
+      description: Physical damage урон, полученный игроком
+    - name: participant.placement
+      description: Показатель «placement» игрока (уточнить)
+    - name: participant.playerAugment1
+      description: Выбранный аргумент (руна) №1
+    - name: participant.playerAugment2
+      description: Выбранный аргумент (руна) №2
+    - name: participant.playerAugment3
+      description: Выбранный аргумент (руна) №3
+    - name: participant.playerAugment4
+      description: Выбранный аргумент (руна) №4
+    - name: participant.playerAugment5
+      description: Выбранный аргумент (руна) №5
+    - name: participant.playerAugment6
+      description: Выбранный аргумент (руна) №6
+    - name: participant.playerSubteamId
+      description: Показатель «player Subteam Id» игрока (уточнить)
+    - name: participant.profileIcon
+      description: Показатель «profile Icon» игрока (уточнить)
+    - name: participant.pushPings
+      description: Количество пингов типа «Push», отправленных игроком
+    - name: participant.puuid
+      description: PUUID игрока (уникальный идентификатор Riot)
+    - name: participant.quadraKills
+      description: Количество quadra (убийств) игрока
+    - name: participant.retreatPings
+      description: Количество пингов типа «Retreat», отправленных игроком
+    - name: participant.riotIdGameName
+      description: Показатель «riot Id Game Name» игрока (уточнить)
+    - name: participant.riotIdTagline
+      description: Показатель «riot Id Tagline» игрока (уточнить)
+    - name: participant.role
+      description: Роль в команде (DUO_SUPPORT, SOLO и т.д.)
+    - name: participant.sightWardsBoughtInGame
+      description: Куплено вардов обзора за игру
+    - name: participant.spell1Casts
+      description: Количество применений способности №1
+    - name: participant.spell2Casts
+      description: Количество применений способности №2
+    - name: participant.spell3Casts
+      description: Количество применений способности №3
+    - name: participant.spell4Casts
+      description: Количество применений способности №4
+    - name: participant.subteamPlacement
+      description: Показатель «subteam Placement» игрока (уточнить)
+    - name: participant.summoner1Casts
+      description: Количество применений суммонерского заклинания №1
+    - name: participant.summoner1Id
+      description: Показатель «summoner1 Id» игрока (уточнить)
+    - name: participant.summoner2Casts
+      description: Количество применений суммонерского заклинания №2
+    - name: participant.summoner2Id
+      description: Показатель «summoner2 Id» игрока (уточнить)
+    - name: participant.summonerId
+      description: Идентификатор аккаунта игрока (encryptedSummonerId)
+    - name: participant.summonerLevel
+      description: Уровень аккаунта призывателя
+    - name: participant.summonerName
+      description: Имя призывателя
+    - name: participant.teamEarlySurrendered
+      description: Команда сдалась рано (true/false)
+    - name: participant.teamId
+      description: ID команды (100 или 200)
+    - name: participant.teamPosition
+      description: Показатель «team Position» игрока (уточнить)
+    - name: participant.timeCCingOthers
+      description: Показатель «time C Cing Others» игрока (уточнить)
+    - name: participant.timePlayed
+      description: Показатель «time Played» игрока (уточнить)
+    - name: participant.totalAllyJungleMinionsKilled
+      description: Убитые союзные лесные крипы
+    - name: participant.totalDamageDealt
+      description: Total damage урон, нанесённый игроком
+    - name: participant.totalDamageDealtToChampions
+      description: Total damage d урон по чемпионам, нанесённый игроком
+    - name: participant.totalDamageShieldedOnTeammates
+      description: Показатель «total Damage Shielded On Teammates» игрока (уточнить)
+    - name: participant.totalDamageTaken
+      description: Total damage урон, полученный игроком
+    - name: participant.totalEnemyJungleMinionsKilled
+      description: Убитые вражеские лесные крипы
+    - name: participant.totalHeal
+      description: Показатель «total Heal» игрока (уточнить)
+    - name: participant.totalHealsOnTeammates
+      description: Показатель «total Heals On Teammates» игрока (уточнить)
+    - name: participant.totalMinionsKilled
+      description: Количество убитых миньонов (лайновых крипов)
+    - name: participant.totalTimeCCDealt
+      description: Total time c c урон, нанесённый игроком
+    - name: participant.totalTimeSpentDead
+      description: Общее время, проведённое мёртвым (секунды)
+    - name: participant.totalUnitsHealed
+      description: Восстановлено здоровья (total Units), полученного игроком
+    - name: participant.tripleKills
+      description: Количество triple (убийств) игрока
+    - name: participant.trueDamageDealt
+      description: True damage урон, нанесённый игроком
+    - name: participant.trueDamageDealtToChampions
+      description: True damage d урон по чемпионам, нанесённый игроком
+    - name: participant.trueDamageTaken
+      description: True damage урон, полученный игроком
+    - name: participant.turretKills
+      description: Количество turret (убийств) игрока
+    - name: participant.turretTakedowns
+      description: Количество захватов/снос цели turret
+    - name: participant.turretsLost
+      description: Показатель «turrets Lost» игрока (уточнить)
+    - name: participant.unrealKills
+      description: Количество unreal (убийств) игрока
+    - name: participant.visionClearedPings
+      description: Количество пингов типа «Vision Cleared», отправленных игроком
+    - name: participant.visionScore
+      description: Суммарный показатель видимости
+    - name: participant.visionWardsBoughtInGame
+      description: Куплено контрол-вардов за игру
+    - name: participant.wardsKilled
+      description: Количество убитых вардов
+    - name: participant.wardsPlaced
+      description: Количество установленных вардов
+    - name: participant.win
+      description: Победа (true/false)
