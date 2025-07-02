@@ -253,7 +253,7 @@ def fetch_matches_once_per_day(
 if __name__ == "__main__":
     import time
     today = dt.date.today()
-    start = today - dt.timedelta(weeks=1)
+    start = today - dt.timedelta(weeks=2)
     end = today - dt.timedelta(days=1)
 
     total_days = (end - start).days + 1

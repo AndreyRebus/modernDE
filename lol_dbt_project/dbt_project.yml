@@ -23,7 +23,7 @@ clean-targets:         # directories to be removed by `dbt clean`
   - "dbt_packages"
 
 flags:
-  require_certificate_validation: False
+  require_certificate_validation: false   # ← здесь, а НЕ в profiles.yml
 # Configuring models
 # Full documentation: https://docs.getdbt.com/docs/configuring-models
 

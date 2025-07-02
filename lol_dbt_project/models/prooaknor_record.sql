@@ -4,6 +4,7 @@
 --   <metric>        – новое значение, если побит исторический рекорд, иначе NULL
 --   <metric>_meta   – "matchId-_-championName" при срабатывании, иначе NULL
 
+{% set nickname = 'Prooaknor#RU1' %}
 {% set metrics = [
     {'name': 'dmg_to_champs',  'agg': 'max'},
     {'name': 'dmg_total',      'agg': 'max'},
@@ -102,8 +103,8 @@ WITH base AS (
         "participant.champlevel"                                   AS champ_level,
         "info.gamecreation"                                        AS game_creation_ts
     FROM {{ source('lol_raw','data_api_mining') }}
-    WHERE source_nickname = 'Monty Gard#RU1'
-      AND CONCAT("participant.riotidgamename", "participant.riotidtagline") = 'Monty GardRU1'
+    WHERE source_nickname = '{{ nickname }}'
+    AND CONCAT("participant.riotidgamename", "participant.riotidtagline") = replace('{{ nickname }}', '#', '')
 ),
 
 aggregated AS (
@@ -124,7 +125,7 @@ aggregated AS (
 today_games AS (
     SELECT *
     FROM aggregated
-    WHERE date(from_unixtime(game_creation_ts / 1000)) = current_date
+    WHERE date(from_unixtime(game_creation_ts / 1000)) = current_date - INTERVAL '1' DAY
 ),
 
 today_metrics AS (
@@ -145,7 +146,7 @@ historical_best AS (
         {% endif %}
         {% endfor %}
     FROM aggregated
-    WHERE date(from_unixtime(game_creation_ts / 1000)) < current_date
+    WHERE date(from_unixtime(game_creation_ts / 1000)) BETWEEN current_date - INTERVAL '32' DAY AND current_date - INTERVAL '2' DAY
 ),
 
 comparison AS (
@@ -159,4 +160,4 @@ comparison AS (
     CROSS JOIN historical_best h
 )
 
-SELECT * FROM comparison
+SELECT *, '{{ nickname }}' as source_nickname FROM comparison
