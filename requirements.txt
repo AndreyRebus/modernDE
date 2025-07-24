@@ -1,0 +1,9 @@
+aiogram
+aiogram-dialog
+boto3
+pandas
+pyarrow
+python-dotenv
+requests
+trino
+urllib3
