@@ -2,33 +2,36 @@
 
 set -e
 
-echo "🧹 Удаление старого Docker..."
-sudo apt remove -y docker docker-ce docker-ce-cli docker-compose-plugin containerd.io || true
-sudo rm -rf /var/lib/docker /var/lib/containerd /etc/docker
+echo "🧹 Удаление старого Docker (если был)..."
+sudo apt remove -y docker docker-engine docker.io containerd runc docker-ce docker-ce-cli docker-compose-plugin || true
+sudo rm -rf /var/lib/docker /var/lib/containerd /etc/docker || true
 
 echo "📦 Установка зависимостей..."
 sudo apt update
 sudo apt install -y ca-certificates curl gnupg lsb-release apt-transport-https
 
-echo "⬇️ Скачивание стабильного Docker .deb-пакета..."
-curl -fsSL https://download.docker.com/linux/ubuntu/dists/focal/pool/stable/amd64/docker-ce_24.0.9-1~ubuntu.20.04~focal_amd64.deb -o docker-ce.deb
+echo "🔐 Добавление GPG ключа Docker..."
+sudo install -m 0755 -d /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
+  | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+sudo chmod a+r /etc/apt/keyrings/docker.gpg
 
-echo "📥 Установка Docker .deb..."
-sudo apt install -y ./docker-ce.deb
-rm docker-ce.deb
+echo "📝 Добавление Docker репозитория..."
+echo \
+  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
+  https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" \
+  | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
 
-echo "🔌 Установка Docker Compose как CLI-плагина..."
-sudo mkdir -p /usr/libexec/docker/cli-plugins
-curl -SL https://github.com/docker/compose/releases/latest/download/docker-compose-linux-x86_64 \
-  -o /usr/libexec/docker/cli-plugins/docker-compose
-sudo chmod +x /usr/libexec/docker/cli-plugins/docker-compose
+echo "📥 Установка Docker Engine и Compose..."
+sudo apt update
+sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 
-echo "👤 Добавление текущего пользователя в группу docker..."
+echo "👤 Добавление пользователя '$USER' в группу docker..."
 sudo usermod -aG docker "$USER"
 
 echo "✅ Проверка установки:"
-docker version
+docker --version
 docker compose version
 
 echo ""
-echo "🚀 Установка завершена. Перезапусти терминал или выполни 'newgrp docker'."
+echo "🚀 Установка завершена. Перезапусти терминал или выполни 'newgrp docker' для применения группы."

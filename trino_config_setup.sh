@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-
+cd ./etc
 # ───── Устанавливаем только нужные утилиты ─────
 echo "==> Installing keytool & htpasswd (openjdk + apache2-utils)…"
 sudo apt-get update -qq
@@ -64,8 +64,6 @@ cat > "${CONFIG_FILE}" <<EOF
 coordinator=true
 node-scheduler.include-coordinator=true
 
-# HTTP-порт оставляем, но при allow-insecure=false он не будет обслуживать запросы
-http-server.http.port=8080
 # Discovery-URI лучше указывать по HTTPS:
 discovery.uri=https://localhost:8443
 
