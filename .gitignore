@@ -1,7 +1,10 @@
 venv/
 .env
 
+*.pyc
 etc/config.properties
 etc/keystore.p12
 etc/password-authenticator.properties
 etc/password.db
+
+bot/data/concat_record.parquet
