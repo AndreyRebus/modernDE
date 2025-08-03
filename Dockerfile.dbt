@@ -1,0 +1,35 @@
+FROM python:3.12-slim
+
+# 1. Устанавливаем dbt-core и адаптер dbt-trino
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends gcc build-essential && \
+    pip install --no-cache-dir \
+        dbt-core==1.8.1 \
+        dbt-trino==1.8.1 && \
+    apt-get purge -y --auto-remove gcc build-essential && \
+    rm -rf /var/lib/apt/lists/*
+
+# 2. Создаём profiles.yml внутри образа
+ENV DBT_PROFILES_DIR=/root/.dbt
+
+RUN mkdir -p "${DBT_PROFILES_DIR}" && \
+    cat > "${DBT_PROFILES_DIR}/profiles.yml" <<'YAML'
+lol_dbt_project:
+  target: dev
+  outputs:
+    dev:
+      type: trino
+      method: ldap
+      host: "{{ env_var('TRINO_HOST') }}"
+      port: "{{ env_var('TRINO_PORT', 8443) | as_number }}"
+      user: "{{ env_var('TRINO_USER') }}"
+      password: "{{ env_var('TRINO_PASSWORD') }}"
+      http_scheme: https
+      verify: false
+      database: "{{ env_var('TRINO_CATALOG') }}"
+      schema: "{{ env_var('DBT_SCHEMA') }}"
+      threads: "{{ env_var('DBT_THREADS', 1) | as_number }}"
+YAML
+
+# 3. Рабочая директория – сюда будет монтироваться dbt-проект
+WORKDIR /workspace

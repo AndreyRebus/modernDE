@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 import asyncio
@@ -71,7 +70,7 @@ async def getter(dialog_manager: DialogManager, **kwargs):
         photo = (
             MediaAttachment(
                 path=str(random.choice(files)),
-                type="photo",                 # ← ОБЯЗАТЕЛЬНО
+                type="photo",
             )
             if files else None
         )
@@ -113,7 +112,7 @@ def _split_meta(raw: str | None):
     if not raw or not isinstance(raw, str):
         return "<match>", "<champion>"
     if "-_-" in raw:
-        match_id, champ = raw.split("-_-", 1)
+        match_id, champ = raw.split("-_ -", 1)
         return match_id or "<match>", champ or "<champion>"
     return raw, "<champion>"
 
@@ -121,20 +120,21 @@ async def push_daily_carousel(chat_id: int):
     df = load_data(force=True)
     USER_MESSAGES[chat_id] = build_messages(df)
 
-    dm = registry.bg(          # берём фонового менеджера из реестра
+    dm = registry.bg(
         bot=bot,
         user_id=chat_id,
         chat_id=chat_id,
     )
-    # 3. Запускаем окно и ждём окончания отправки
     await dm.start(
         RecSG.show,
         data={"idx": 0},
-        mode=StartMode.RESET_STACK,   # ← новый параметр
+        mode=StartMode.RESET_STACK,
     )
+
 
 def build_messages(df: pd.DataFrame) -> List[Dict]:
     sent_pairs: set[tuple[str, str, str]] = set()
+    counts: Dict[str, int] = {}
     out: List[Dict] = []
 
     for _, row in df.iterrows():
@@ -153,13 +153,9 @@ def build_messages(df: pd.DataFrame) -> List[Dict]:
 
             match_id, champion = _split_meta(row.get(f"{metric}_meta"))
 
-            # ── Гиперссылка на LeagueOfGraphs ───────────────────────────
-            num = match_id.removeprefix("RU_")           # 531424992
-            match_link = (
-                f'<a href="https://www.leagueofgraphs.com/match/ru/{num}">'
-                f'{match_id}</a>'
-            )
-            # ────────────────────────────────────────────────────────────
+            # не больше трёх ачивок на одного персонажа
+            if counts.get(champion, 0) >= 3:
+                continue
 
             key = (nick, metric, match_id)
             if key in sent_pairs:
@@ -169,13 +165,20 @@ def build_messages(df: pd.DataFrame) -> List[Dict]:
             if isinstance(val, float) and val.is_integer():
                 val = int(val)
 
+            num = match_id.removeprefix("RU_")
+            match_link = (
+                f'<a href="https://www.leagueofgraphs.com/match/ru/{num}">' +
+                f'{match_id}</a>'
+            )
+
             text = TEMPLATES[metric].format(
                 nickname=nick, matchId=match_link, champion=champion, value=val
             )
             out.append({"text": text, "champion": champion})
+
+            counts[champion] = counts.get(champion, 0) + 1
+
     return out
-
-
 
 # ───────────────────────── dialog setup ────────────────────────
 class RecSG(StatesGroup):
@@ -198,8 +201,8 @@ async def on_right(c, button, dialog_manager: DialogManager):
 
 
 view = Window(
-    DynamicMedia("photo"),                     # картинка
-    Format("{text}\n\n({pos}/{total})"),       # текст + счётчик
+    DynamicMedia("photo"),
+    Format("{text}\n\n({pos}/{total})"),
     Row(
         Button(Const("◀"), id="left",
                on_click=on_left,
@@ -219,7 +222,7 @@ dialog = Dialog(view, launch_mode=LaunchMode.ROOT)
 bot = Bot(BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
 
-registry = setup_dialogs(dp)   # <-- сохраняем ссылку
+registry = setup_dialogs(dp)
 dp.include_router(dialog)
 
 
@@ -251,8 +254,7 @@ async def cmd_check(m, dialog_manager: DialogManager):
 
 
 async def main():
-    fetch_and_cache()        # первичная запись кэша
-
+    fetch_and_cache()
 
     loop = asyncio.get_running_loop()
     scheduler = AsyncIOScheduler(
