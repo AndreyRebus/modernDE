@@ -1,0 +1,4 @@
+# Пример: указываем, что storage = локальная SQLite
+storage:
+  sqlite:
+    base_dir: .

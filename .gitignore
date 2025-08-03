@@ -9,3 +9,6 @@ etc/password-authenticator.properties
 etc/password.db
 
 bot/data/
+
+*.db
+*__.py

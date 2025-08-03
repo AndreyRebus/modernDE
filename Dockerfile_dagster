@@ -1,0 +1,17 @@
+# ---- host-процессы Dagster (Dagit UI + daemon) ----
+FROM python:3.11-slim
+
+# 1. пакеты, которые нужны только веб-серверу/демону
+RUN pip install --no-cache-dir \
+    dagster \
+    dagster-webserver \
+    dagster-graphql \
+    dagster-docker    # ← run-launcher для «dev»
+
+# 2. конфиг-директория
+ENV DAGSTER_HOME=/opt/dagster/dagster_home
+RUN mkdir -p $DAGSTER_HOME
+WORKDIR $DAGSTER_HOME
+
+# (если у вас есть dagster.yaml / workspace.yaml — скопируйте их)
+# COPY dagster.yaml workspace.yaml $DAGSTER_HOME

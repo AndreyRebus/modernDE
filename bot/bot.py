@@ -1,17 +1,3 @@
-"""
-record_notifier_bot.py
-~~~~~~~~~~~~~~~~~~~~~~
-Вариант с **одним** сообщением‑каруселью и кнопками ◀ / ▶.
-Используем aiogram‑dialog для перелистывания рекордов.
-
-Логика:
-1. Команда /check собирает все рекорд‑сообщения (как раньше).
-2. Сохраняет их в памяти (dict user_id → list[str]).
-3. Открывает диалог, в котором:
-   • текст = текущий рекорд;
-   • две inline‑кнопки «◀» и «▶» меняют индекс.
-4. /refresh — обновляет локальный Parquet‑кэш (как было).
-"""
 
 from __future__ import annotations
 
@@ -29,7 +15,6 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram_dialog.widgets.media import DynamicMedia
 from aiogram_dialog.api.entities import MediaAttachment
 import random  
-
 from aiogram.enums import ParseMode
 from aiogram.filters import Command
 
@@ -39,6 +24,7 @@ from aiogram_dialog import (
     LaunchMode,
     Window,
     setup_dialogs,
+    StartMode
 )
 from aiogram_dialog.widgets.kbd import Row, Button
 from aiogram_dialog.widgets.text import Format, Const
@@ -48,6 +34,8 @@ from dotenv import load_dotenv
 from templates import TEMPLATES, METRIC_COLS
 from trino_client import query_df
 
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from zoneinfo import ZoneInfo
 # ─────────────────────────── logging ────────────────────────────
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -129,6 +117,21 @@ def _split_meta(raw: str | None):
         return match_id or "<match>", champ or "<champion>"
     return raw, "<champion>"
 
+async def push_daily_carousel(chat_id: int):
+    df = load_data(force=True)
+    USER_MESSAGES[chat_id] = build_messages(df)
+
+    dm = registry.bg(          # берём фонового менеджера из реестра
+        bot=bot,
+        user_id=chat_id,
+        chat_id=chat_id,
+    )
+    # 3. Запускаем окно и ждём окончания отправки
+    await dm.start(
+        RecSG.show,
+        data={"idx": 0},
+        mode=StartMode.RESET_STACK,   # ← новый параметр
+    )
 
 def build_messages(df: pd.DataFrame) -> List[Dict]:
     sent_pairs: set[tuple[str, str, str]] = set()
@@ -216,8 +219,9 @@ dialog = Dialog(view, launch_mode=LaunchMode.ROOT)
 bot = Bot(BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
 
-setup_dialogs(dp)
+registry = setup_dialogs(dp)   # <-- сохраняем ссылку
 dp.include_router(dialog)
+
 
 # ---------------- commands ----------------
 
@@ -247,9 +251,23 @@ async def cmd_check(m, dialog_manager: DialogManager):
 
 
 async def main():
-    fetch_and_cache()  # первый кэш
-    await dp.start_polling(bot)
+    fetch_and_cache()        # первичная запись кэша
 
+
+    loop = asyncio.get_running_loop()
+    scheduler = AsyncIOScheduler(
+        event_loop=loop,
+        timezone=ZoneInfo(os.getenv("TZ", "UTC")),
+    )
+    scheduler.add_job(
+        push_daily_carousel,
+        trigger="cron",
+        hour=18, minute=27,
+        args=[int(os.getenv("TARGET_CHAT_ID"))],
+    )
+    scheduler.start()
+
+    await dp.start_polling(bot)
 
 if __name__ == "__main__":
     asyncio.run(main())

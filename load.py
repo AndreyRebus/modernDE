@@ -134,10 +134,12 @@ def register_partition(location: str) -> None:
             cur = conn.cursor()
             cur.execute(sql.strip())
             cur.fetchall()
-        logging.info("✅ Registered Iceberg partition at %s", location)
     except Exception as exc:
-        logging.exception("💥 Failed to register partition at %s: %s", location, exc)
-
+        msg = str(exc)
+        if "File already exists" in msg or "already registered" in msg:
+            logging.info("ℹ️  Partition already registered")
+        else:
+            logging.exception("💥 Failed to register partition at %s: %s", location, exc)
 # ────────────────── core ──────────────────
 
 def fetch_matches_once_per_day(
@@ -239,7 +241,7 @@ def fetch_matches_once_per_day(
 # ───────────── пример использования ─────────────
 if __name__ == "__main__":
     today = dt.date.today()
-    start = today - dt.timedelta(weeks=3)
+    start = today - dt.timedelta(weeks=1)
     end = today - dt.timedelta(days=1)
     total_days = (end - start).days + 1
     riot_ids = [
