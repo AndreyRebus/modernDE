@@ -17,3 +17,12 @@ STALE_AFTER = timedelta(hours=int(os.getenv("STALE_HOURS", "6")))
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
+
+NICKNAMES = [
+    "Monty Gard#RU1",
+    "Breaksthesilence#RU1",
+    "2pilka#RU1",
+    "Gruntq#RU1",
+    "Шaзам#RU1",
+    "Prooaknor#RU1",
+]

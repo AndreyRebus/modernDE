@@ -5,7 +5,9 @@ from typing import Dict, List
 from aiogram_dialog import Window, Dialog, DialogManager, LaunchMode
 from aiogram_dialog.widgets.media import DynamicMedia
 from aiogram_dialog.api.entities import MediaAttachment
-from aiogram_dialog.widgets.kbd import Row, Button
+from aiogram_dialog.widgets.kbd import Row, Button, Url
+from .config import NICKNAMES
+from urllib.parse import quote
 from aiogram_dialog.widgets.text import Format, Const
 from aiogram.fsm.state import State, StatesGroup
 
@@ -57,9 +59,22 @@ async def on_right(c, button, dialog_manager: DialogManager):
     if idx < len(msgs) - 1:
         dialog_manager.dialog_data["idx"] = idx + 1
 
+
+nick_buttons = [
+    Url(
+        Const(n.split("#", 1)[0]),    # текст кнопки
+        Const(                        # сам URL тоже Text-объект!
+            f"https://www.leagueofgraphs.com/ru/summoner/ru/{quote(n.split('#', 1)[0])}"
+        ),
+    )
+    for n in NICKNAMES
+]
+nick_row = Row(*nick_buttons)
+
 view = Window(
     DynamicMedia("photo"),
     Format("{text}\n\n({pos}/{total})"),
+    nick_row, 
     Row(
         Button(Const("◀"), id="left", on_click=on_left, when=lambda d, *_: not d["disable_left"]),
         Button(Const("▶"), id="right", on_click=on_right, when=lambda d, *_: not d["disable_right"]),

@@ -10,8 +10,8 @@ def setup_scheduler(loop, timezone: str, bot, registry, chat_id: int):
     scheduler.add_job(
         push_daily_carousel,
         trigger="cron",
-        hour=22,
-        minute=30,
+        hour=23,
+        minute=3,
         args=[bot, registry, chat_id],
     )
     scheduler.start()
