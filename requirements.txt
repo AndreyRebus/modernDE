@@ -9,3 +9,5 @@ python-dotenv>=1.0
 trino[auth]>=0.328
 urllib3>=2.2
 dagster>=1.5
+nats-py>=2.8.0
+python-dotenv>=1.0.0
