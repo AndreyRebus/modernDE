@@ -1,19 +1,28 @@
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from zoneinfo import ZoneInfo
+import asyncio
+from nats_trigger import setup_nats_trigger_and_bind
 
-from .config import logger
 from .dialogs import push_daily_carousel
 
 
-def setup_scheduler(loop, timezone: str, bot, registry, chat_id: int):
-    scheduler = AsyncIOScheduler(event_loop=loop, timezone=ZoneInfo(timezone))
-    scheduler.add_job(
-        push_daily_carousel,
-        trigger="cron",
-        hour=23,
-        minute=3,
-        args=[bot, registry, chat_id],
-    )
-    scheduler.start()
+NATS_HANDLE = None
 
-    return scheduler
+
+def setup_scheduler(loop, timezone: str, bot, registry, chat_id: int):
+    async def _bind():
+        global NATS_HANDLE
+        NATS_HANDLE = await setup_nats_trigger_and_bind(
+            bot=bot,
+            registry=registry,
+            chat_id=chat_id,
+            push_daily_carousel=push_daily_carousel,
+        )
+
+    loop.create_task(_bind())
+    return None
+
+
+async def shutdown_scheduler():
+    global NATS_HANDLE
+    if NATS_HANDLE:
+        await NATS_HANDLE.close()
+        NATS_HANDLE = None
