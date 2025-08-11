@@ -36,22 +36,28 @@ services:
     networks:
       - trino_network
 
-  dagster:
+  mybot:
     build:
       context: .
-      dockerfile: Dockerfile_dagster
-    container_name: dagster
+      dockerfile: Dockerfile.mybot     # Соберётся автоматически при up --build
+    image: mybot:latest
+    container_name: mybot
+    restart: unless-stopped
+    env_file:
+      - .env                           # .env лежит рядом с compose и НЕ попадает в образ
     environment:
-      DAGSTER_HOME: /opt/dagster/dagster_home
+      # Лучше указывать сервис Trino по имени в сети compose
+      TRINO_HOST: controller
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUNBUFFERED: "1"
+      PIP_NO_CACHE_DIR: "1"
     volumes:
-      - ./dagster_project:/opt/dagster/app          # ваш код
-      - ./dagster_home:/opt/dagster/dagster_home    # метаданные Dagster
-    working_dir: /opt/dagster/app                   # ← запускаемся прямо в каталоге проекта
-    command: >
-      bash -c "pip install --no-cache -r requirements.txt &&
-              dagster dev -p 3000 -h 0.0.0.0"      # аргумент-каталог убран
-    ports:
-      - '3000:3000'
+      - ./mybot:/app/mybot:ro          # Код монтируется read-only
+      - ./data:/app/data               # Данные/картинки и т.д.
+    depends_on:
+      - controller
+    networks:
+      - trino_network
   
 networks:
   trino_network:

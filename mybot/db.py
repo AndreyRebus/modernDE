@@ -1,4 +1,4 @@
-from trino_client import query_df
+from .trino_client import query_df
 from .config import logger
 
 def fetch_columns(columns: list[str], table: str):

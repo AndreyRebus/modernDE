@@ -1,0 +1,44 @@
+# syntax=docker/dockerfile:1
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+
+RUN apt-get update -y \
+ && apt-get install -y --no-install-recommends ca-certificates tzdata \
+ && rm -rf /var/lib/apt/lists/*
+
+# Ставим зависимости из корневого requirements.txt (лежит рядом с Dockerfile.mybot)
+COPY requirements.txt /tmp/requirements.txt
+RUN pip install --upgrade pip \
+ && pip install -r /tmp/requirements.txt
+
+WORKDIR /app
+
+# Непривилегированный пользователь и директории
+RUN useradd -m -u 10001 botuser \
+ && mkdir -p /app/mybot /app/data \
+ && chown -R botuser:botuser /app
+
+# Опциональный том для данных
+VOLUME ["/app/data"]
+
+# Стартовый скрипт — запускаем модуль бота из примонтированного кода
+COPY --chown=botuser:botuser <<'EOF' /usr/local/bin/start-mybot.sh
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Если вместе с кодом примонтирован свой requirements.txt — доустановим (необязательно)
+if [ -f "/app/mybot/requirements.txt" ]; then
+  echo "Installing extra deps from /app/mybot/requirements.txt..."
+  pip install -r /app/mybot/requirements.txt
+fi
+
+export PYTHONPATH="/app:${PYTHONPATH:-}"
+exec python -m mybot.main
+EOF
+RUN chmod +x /usr/local/bin/start-mybot.sh
+
+USER botuser
+ENTRYPOINT ["start-mybot.sh"]

@@ -12,7 +12,17 @@ docker run --rm -it \
   dbt dbt run --project-dir /workspace
 
 docker build --no-cache --pull -f Dockerfile.splashes -t lol-splashes .
-docker run --rm \
-  -v /home/modernDE/bot/data/splashes:/data/splashes \
-  -w /app \
-  lol-splashes
+docker run --rm -v /home/modernDE/bot/data/splashes:/data/splashes -w /app lol-splashes
+
+#-------------------------------#------------------#
+docker build -f Dockerfile.mybot -t mybot .
+# Запуск + сборка образа (если нужно)
+docker compose up -d --build mybot
+
+# Остановка
+docker compose stop mybot
+
+# Перезапуск
+docker compose restart mybot
+#logs
+docker compose logs -f mybot
