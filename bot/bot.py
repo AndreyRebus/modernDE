@@ -6,17 +6,17 @@ import math
 import os
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, List
 import json
+import random
 
 import pandas as pd
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
-from aiogram_dialog.widgets.media import DynamicMedia
-from aiogram_dialog.api.entities import MediaAttachment
-import random  
 from aiogram.enums import ParseMode
 from aiogram.filters import Command
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.types.error_event import ErrorEvent
+from aiogram.types import CallbackQuery
 
 from aiogram_dialog import (
     Dialog,
@@ -24,23 +24,18 @@ from aiogram_dialog import (
     LaunchMode,
     Window,
     setup_dialogs,
-    StartMode
 )
 from aiogram_dialog.widgets.kbd import Row, Button, Group
+from aiogram_dialog.widgets.media import DynamicMedia
 from aiogram_dialog.widgets.text import Format, Const
-from aiogram.fsm.state import State, StatesGroup
+from aiogram_dialog.api.entities import MediaAttachment
+from aiogram_dialog.api.exceptions import OutdatedIntent, UnknownIntent
+
 from dotenv import load_dotenv
+from contextlib import suppress
 
 from templates import TEMPLATES, METRIC_COLS
 from trino_client import query_df
-
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from zoneinfo import ZoneInfo
-
-from contextlib import suppress
-from aiogram.types.error_event import ErrorEvent
-from aiogram.types import CallbackQuery
-from aiogram_dialog.api.exceptions import OutdatedIntent, UnknownIntent
 
 # ─────────────────────────── logging ────────────────────────────
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -59,9 +54,8 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 PARQUET_FILE = DATA_DIR / "concat_record.parquet"
 STALE_AFTER = timedelta(hours=int(os.getenv("STALE_HOURS", "6")))
 
-
 # ─────────────────────────── data cache ─────────────────────────
-ALL_COLUMNS: List[str] = ["source_nickname"] + METRIC_COLS + [f"{m}_meta" for m in METRIC_COLS]
+ALL_COLUMNS: list[str] = ["source_nickname"] + METRIC_COLS + [f"{m}_meta" for m in METRIC_COLS]
 
 async def getter(dialog_manager: DialogManager, **kwargs):
     data = dialog_manager.dialog_data
@@ -72,9 +66,8 @@ async def getter(dialog_manager: DialogManager, **kwargs):
     if msgs:
         item = msgs[idx]
         champion = item["champion"]
-        # ищем случайный файл вида  Ahri_*.jpg / Ahri_*.png
-        files = list(SPLASH_DIR.glob(f"{champion}_*.jpg")) + \
-                list(SPLASH_DIR.glob(f"{champion}_*.png"))
+        # ищем случайный файл вида Ahri_*.jpg / Ahri_*.png
+        files = list(SPLASH_DIR.glob(f"{champion}_*.jpg")) + list(SPLASH_DIR.glob(f"{champion}_*.png"))
         photo = (
             MediaAttachment(
                 path=str(random.choice(files)),
@@ -105,7 +98,6 @@ def fetch_and_cache() -> pd.DataFrame:
     logger.info("Saved %d rows", len(df))
     return df
 
-
 def load_data(force: bool = False) -> pd.DataFrame:
     if force or not PARQUET_FILE.exists():
         return fetch_and_cache()
@@ -131,40 +123,10 @@ async def on_riot_click(c, button, dialog_manager: DialogManager):
     except Exception:
         pass
 
-async def push_daily_carousel(chat_id: int):
-    df = load_data(force=True)
-    USER_MESSAGES[chat_id] = build_messages(df)
-
-    dm = registry.bg(
-        bot=bot,
-        user_id=chat_id,
-        chat_id=chat_id,
-    )
-    await dm.start(
-        RecSG.show,
-        data={"idx": 0},
-        mode=StartMode.RESET_STACK,
-    )
-
-async def on_startup(bot: Bot):
-    target = os.getenv("TARGET_CHAT_ID", "").strip()
-    if not target:
-        logger.error("TARGET_CHAT_ID не задан")
-        return
-    chat_id = int(target)
-    try:
-        # При желании тут можно просто:
-        # await bot.send_message(chat_id, "Привет! Рассылаю карусель…")
-        await push_daily_carousel(chat_id)
-        logger.info("Initial push sent to chat %s", chat_id)
-    except Exception:
-        logger.exception("Failed to send initial push")
-
-
-def build_messages(df: pd.DataFrame) -> List[Dict]:
+def build_messages(df: pd.DataFrame) -> list[dict]:
     sent_pairs: set[tuple[str, str, str]] = set()
-    counts: Dict[str, int] = {}
-    out: List[Dict] = []
+    counts: dict[str, int] = {}
+    out: list[dict] = []
 
     for _, row in df.iterrows():
         nick = row.get("source_nickname")
@@ -213,14 +175,30 @@ def build_messages(df: pd.DataFrame) -> List[Dict]:
 class RecSG(StatesGroup):
     show = State()
 
-# in‑memory storage: user_id -> list[str]
-USER_MESSAGES: Dict[int, List[str]] = {}
+# in-memory storage: user_id -> list[dict]
+USER_MESSAGES: dict[int, list[dict]] = {}
+
+async def on_startup(bot: Bot):
+    target = os.getenv("TARGET_CHAT_ID", "").strip()
+    if not target:
+        logger.error("TARGET_CHAT_ID не задан")
+        return
+    chat_id = int(target)
+    try:
+        df = load_data(force=True)
+        USER_MESSAGES[chat_id] = build_messages(df)
+
+        dm = registry.bg(bot=bot, user_id=chat_id, chat_id=chat_id)
+        await dm.start(RecSG.show, data={"idx": 0})
+
+        logger.info("Initial push sent to chat %s", chat_id)
+    except Exception:
+        logger.exception("Failed to send initial push")
 
 
 async def on_left(c, button, dialog_manager: DialogManager):
     if dialog_manager.dialog_data.get("idx", 0) > 0:
         dialog_manager.dialog_data["idx"] -= 1
-
 
 async def on_right(c, button, dialog_manager: DialogManager):
     msgs = USER_MESSAGES.get(dialog_manager.event.from_user.id, [])
@@ -228,8 +206,7 @@ async def on_right(c, button, dialog_manager: DialogManager):
     if idx < len(msgs) - 1:
         dialog_manager.dialog_data["idx"] = idx + 1
 
-
-def _parse_riot_ids(raw: str) -> List[str]:
+def _parse_riot_ids(raw: str) -> list[str]:
     raw = (raw or "").strip()
     if not raw:
         return []
@@ -296,7 +273,6 @@ async def cmd_refresh(m):
         logger.exception("Ошибка обновления")
         await m.answer(f"❌ Ошибка обновления: {e}")
 
-
 @dp.message(Command("check"))
 async def cmd_check(m, dialog_manager: DialogManager):
     try:
@@ -310,39 +286,10 @@ async def cmd_check(m, dialog_manager: DialogManager):
     USER_MESSAGES[m.from_user.id] = msgs
     await dialog_manager.start(RecSG.show, data={"idx": 0})
 
-@dp.errors()
-async def on_dialog_errors(event: ErrorEvent):
-    exc = event.exception
-    # Клики по старым сообщениям после рестарта
-    if isinstance(exc, (OutdatedIntent, UnknownIntent)):
-        cq: CallbackQuery | None = getattr(event.update, "callback_query", None)
-        if cq:
-            with suppress(Exception):
-                # Короткий ответ без алерта, чтобы “часики” пропали
-                await cq.answer("Сообщение устарело. Откройте новую карусель (/check).", show_alert=False)
-        return True  # подавить лог/трейсбек
-
-
 async def main():
     await bot.delete_webhook(drop_pending_updates=True)
     fetch_and_cache()
-
-    loop = asyncio.get_running_loop()
-    scheduler = AsyncIOScheduler(
-        event_loop=loop,
-        timezone=ZoneInfo(os.getenv("TZ", "UTC")),
-    )
-    scheduler.add_job(
-        push_daily_carousel,
-        trigger="cron",
-        hour=18, minute=27,
-        args=[int(os.getenv("TARGET_CHAT_ID"))],
-    )
-    scheduler.start()
-
     await dp.start_polling(bot)
-
-
 
 if __name__ == "__main__":
     asyncio.run(main())
