@@ -5,6 +5,7 @@ import logging
 import os
 import re
 import time
+import uuid
 import datetime as dt
 import urllib.parse
 from typing import Any, Dict, List, Optional
@@ -23,7 +24,7 @@ logging.basicConfig(
     format="%(asctime)s  %(levelname)-8s  %(message)s",
 )
 
-# Отключаем InsecureRequestWarning для self‑signed TLS
+# Отключаем InsecureRequestWarning для self-signed TLS
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # ── Загрузка и проверка переменных окружения ──
@@ -65,6 +66,8 @@ TRINO_PASSWORD = os.environ["TRINO_PASSWORD"]
 TRINO_CATALOG = os.environ["TRINO_CATALOG"]
 TRINO_SCHEMA = os.environ["TRINO_SCHEMA"]
 TRINO_TABLE = os.environ["TRINO_TABLE"]
+TRINO_HTTP_SCHEME = os.getenv("TRINO_HTTP_SCHEME", "https")  # https по умолчанию
+TRINO_VERIFY_TLS = os.getenv("TRINO_VERIFY_TLS", "false").lower() in ("1", "true", "yes")
 
 # Riot routing defaults
 PLATFORM_ROUTING = os.getenv("PLATFORM_ROUTING", "ru1")
@@ -79,7 +82,124 @@ META_COLS: List[str] = [
     "info.gameVersion",
 ]
 
-# ────────────────── helpers ──────────────────
+FULL_TABLE = f'{TRINO_CATALOG}.{TRINO_SCHEMA}.{TRINO_TABLE}'
+
+# ────────────────── Trino helpers ──────────────────
+
+def trino_connect():
+    return dbapi.connect(
+        host=TRINO_HOST,
+        port=TRINO_PORT,
+        user=TRINO_USER,
+        catalog=TRINO_CATALOG,
+        schema=TRINO_SCHEMA,
+        http_scheme=TRINO_HTTP_SCHEME,
+        auth=BasicAuthentication(TRINO_USER, TRINO_PASSWORD),
+        verify=TRINO_VERIFY_TLS,
+    )
+
+def exec_sql(sql: str) -> List[tuple]:
+    """Выполнить SQL и вернуть все строки результата."""
+    logging.debug("SQL>\n%s", sql.strip())
+    with trino_connect() as conn:
+        cur = conn.cursor()
+        cur.execute(sql.strip())
+        try:
+            rows = cur.fetchall()
+        except Exception:
+            rows = []
+    return rows
+
+def try_add_files_direct(location: str) -> bool:
+    """Пытается выполнить ALTER TABLE … EXECUTE add_files(...) прямо в целевую таблицу.
+       Возвращает True при успехе или «уже подключено», False — если надо падать в staging."""
+    sql = f"""
+        ALTER TABLE {FULL_TABLE}
+        EXECUTE add_files(
+            location => '{location}',
+            format   => 'PARQUET'
+        )
+    """
+    try:
+        exec_sql(sql)
+        logging.info("📎 add_files → %s: OK", location)
+        return True
+    except Exception as exc:
+        msg = str(exc)
+        # Уже зарегистрировано — считаем успехом
+        if ("File already exists" in msg) or ("already registered" in msg):
+            logging.info("ℹ️ add_files: files at %s already registered", location)
+            return True
+        # Ограничение процедуры на партиционированных таблицах — надо идти через staging
+        not_supported = (
+            "does not support partitioned tables" in msg.lower()
+            or "invalid_procedure_argument" in msg.lower()
+            or "not supported" in msg.lower() and "partition" in msg.lower()
+        )
+        if not_supported:
+            logging.info("↪️ add_files not supported for partitioned table → will use staging")
+            return False
+        # Иная ошибка — пробрасываем
+        logging.exception("💥 add_files failed for %s", location)
+        raise
+
+def ingest_via_staging(location: str) -> None:
+    """Импорт через временную непартиционированную таблицу:
+       1) CREATE TABLE …_stg (LIKE target EXCLUDING PROPERTIES) WITH (format='PARQUET')
+       2) add_files в staging
+       3) INSERT INTO target SELECT * FROM staging
+       4) UNREGISTER staging (файлы в S3 сохраняются)
+    """
+    stg_name = f"{TRINO_TABLE}__stg_{int(time.time())}_{uuid.uuid4().hex[:8]}"
+    full_stg = f"{TRINO_CATALOG}.{TRINO_SCHEMA}.{stg_name}"
+
+    try:
+        # 1) Создать непартиционированный клон схемы
+        create_sql = f"""
+            CREATE TABLE {full_stg}
+            (LIKE {FULL_TABLE} EXCLUDING PROPERTIES)
+            WITH (format = 'PARQUET')
+        """
+        exec_sql(create_sql)
+        logging.info("🧪 Created staging table %s", full_stg)
+
+        # 2) Подцепить файлы в staging
+        add_sql = f"""
+            ALTER TABLE {full_stg}
+            EXECUTE add_files(
+                location => '{location}',
+                format   => 'PARQUET'
+            )
+        """
+        exec_sql(add_sql)
+        logging.info("📎 add_files → %s into %s: OK", location, full_stg)
+
+        # 3) Перекладка в целевую таблицу
+        insert_sql = f"INSERT INTO {FULL_TABLE} SELECT * FROM {full_stg}"
+        rows = exec_sql(insert_sql)
+        logging.info("📥 INSERT INTO %s FROM %s: OK", FULL_TABLE, full_stg)
+
+    finally:
+        # 4) Снять регистрацию staging (данные в S3 не трогаем)
+        try:
+            unregister_sql = (
+                f"CALL {TRINO_CATALOG}.system.unregister_table("
+                f"schema_name => '{TRINO_SCHEMA}', table_name => '{stg_name}')"
+            )
+            exec_sql(unregister_sql)
+            logging.info("🧹 Unregistered staging table %s (S3 files preserved)", full_stg)
+        except Exception:
+            logging.warning("⚠️ Failed to unregister staging table %s — please clean up manually", full_stg)
+
+def register_location_safely(location: str) -> None:
+    """Главная точка регистрации файлов:
+       — попытаться add_files напрямую;
+       — при неудаче из-за партиций — staging-импорт с последующим unregister."""
+    direct_ok = try_add_files_direct(location)
+    if not direct_ok:
+        ingest_via_staging(location)
+
+# ────────────────── HTTP helper ──────────────────
 
 def safe_get(
     url: str,
@@ -88,11 +208,11 @@ def safe_get(
     max_retries: int = 3,
     backoff: float = 0.5,
 ) -> Optional[Dict[str, Any]]:
-    """GET с JSON‑ответом и автоматическим повтором при 429 / 5xx.
+    """GET с JSON-ответом и автоматическим повтором при 429 / 5xx.
     Возвращает dict либо None после исчерпания попыток."""
     for attempt in range(max_retries):
         try:
-            r = requests.get(url, headers=headers, timeout=10)
+            r = requests.get(url, headers=headers, timeout=10, verify=False)
         except requests.RequestException as exc:
             logging.error("💥 %s — network error: %s", url, exc)
             return None
@@ -110,36 +230,6 @@ def safe_get(
         return None
     return None
 
-
-def register_partition(location: str) -> None:
-    """Регистрирует партицию Iceberg для заданного S3(location)"""
-    sql = f"""
-        ALTER TABLE {TRINO_CATALOG}.{TRINO_SCHEMA}.{TRINO_TABLE}
-        EXECUTE add_files(
-            location => '{location}',
-            format   => 'PARQUET'
-        )
-    """
-    try:
-        with dbapi.connect(
-            host=TRINO_HOST,
-            port=TRINO_PORT,
-            user=TRINO_USER,
-            catalog=TRINO_CATALOG,
-            schema=TRINO_SCHEMA,
-            http_scheme="https",
-            auth=BasicAuthentication(TRINO_USER, TRINO_PASSWORD),
-            verify=False,
-        ) as conn:
-            cur = conn.cursor()
-            cur.execute(sql.strip())
-            cur.fetchall()
-    except Exception as exc:
-        msg = str(exc)
-        if "File already exists" in msg or "already registered" in msg:
-            logging.info("ℹ️  Partition already registered")
-        else:
-            logging.exception("💥 Failed to register partition at %s: %s", location, exc)
 # ────────────────── core ──────────────────
 
 def fetch_matches_once_per_day(
@@ -164,12 +254,12 @@ def fetch_matches_once_per_day(
     safe_riot_id = riot_id_clean.replace("#", "_")
     s3_folder = f"{S3_PREFIX}/{folder_date}/{safe_riot_id}/"
 
-    # Если найдены существующие parquet-файлы — регистрируем их и выходим
+    # Если найдены существующие parquet-файлы — подцепляем и выходим
     existing = [obj.key for obj in bucket.objects.filter(Prefix=s3_folder) if obj.key.endswith('.parquet')]
     if existing:
         logging.info("🔁 %s: found existing parquet files: %s", folder_date, existing)
         location = f"s3://{S3_BUCKET_NAME}/{s3_folder.rstrip('/')}"
-        register_partition(location)
+        register_location_safely(location)
         return existing[0]
 
     headers = {"X-Riot-Token": RIOT_API_KEY}
@@ -225,6 +315,7 @@ def fetch_matches_once_per_day(
     # Сохраняем и загружаем новый parquet
     df = pd.DataFrame(parts)
     df["source_nickname"] = riot_id_clean
+    df["event_date"] = load_date
     buf = io.BytesIO()
     df.to_parquet(buf, index=False, compression="snappy")
     buf.seek(0)
@@ -232,9 +323,9 @@ def fetch_matches_once_per_day(
     s3.Object(S3_BUCKET_NAME, object_key).upload_fileobj(buf)
     logging.info("✅ %s: uploaded %s rows → %s", folder_date, len(df), object_key)
 
-    # Регистрируем новую партицию
+    # Регистрируем файлы
     location = f"s3://{S3_BUCKET_NAME}/{s3_folder.rstrip('/')}"
-    register_partition(location)
+    register_location_safely(location)
 
     return object_key
 

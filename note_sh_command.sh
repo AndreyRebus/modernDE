@@ -13,6 +13,12 @@ docker run --rm -it \
 
 docker build --no-cache --pull -f Dockerfile.splashes -t lol-splashes .
 docker run --rm \
-  -v /home/modernDE/bot/data/splashes:/data/splashes \
-  -w /app \
+  -v /home/modernDE/bot/data/splashes:/app/data/splashes \
   lol-splashes
+
+docker build --no-cache --pull -f Dockerfile.bot -t bot .
+docker run --rm \
+  --name bot \
+  --env-file .env \
+  -v "$PWD/bot/data/splashes:/app/bot/data/splashes:ro" \
+  bot

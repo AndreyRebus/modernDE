@@ -7,6 +7,7 @@ import os
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List
+import json
 
 import pandas as pd
 from aiogram import Bot, Dispatcher
@@ -25,7 +26,7 @@ from aiogram_dialog import (
     setup_dialogs,
     StartMode
 )
-from aiogram_dialog.widgets.kbd import Row, Button
+from aiogram_dialog.widgets.kbd import Row, Button, Group
 from aiogram_dialog.widgets.text import Format, Const
 from aiogram.fsm.state import State, StatesGroup
 from dotenv import load_dotenv
@@ -35,6 +36,12 @@ from trino_client import query_df
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from zoneinfo import ZoneInfo
+
+from contextlib import suppress
+from aiogram.types.error_event import ErrorEvent
+from aiogram.types import CallbackQuery
+from aiogram_dialog.api.exceptions import OutdatedIntent, UnknownIntent
+
 # ─────────────────────────── logging ────────────────────────────
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -51,6 +58,7 @@ DATA_DIR = Path(os.getenv("DATA_DIR", "data"))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 PARQUET_FILE = DATA_DIR / "concat_record.parquet"
 STALE_AFTER = timedelta(hours=int(os.getenv("STALE_HOURS", "6")))
+
 
 # ─────────────────────────── data cache ─────────────────────────
 ALL_COLUMNS: List[str] = ["source_nickname"] + METRIC_COLS + [f"{m}_meta" for m in METRIC_COLS]
@@ -112,9 +120,16 @@ def _split_meta(raw: str | None):
     if not raw or not isinstance(raw, str):
         return "<match>", "<champion>"
     if "-_-" in raw:
-        match_id, champ = raw.split("-_ -", 1)
+        match_id, champ = raw.split("-_-", 1)
         return match_id or "<match>", champ or "<champion>"
     return raw, "<champion>"
+
+async def on_riot_click(c, button, dialog_manager: DialogManager):
+    # ничего не делаем, только гасим "часики" у Telegram
+    try:
+        await c.answer()
+    except Exception:
+        pass
 
 async def push_daily_carousel(chat_id: int):
     df = load_data(force=True)
@@ -130,6 +145,20 @@ async def push_daily_carousel(chat_id: int):
         data={"idx": 0},
         mode=StartMode.RESET_STACK,
     )
+
+async def on_startup(bot: Bot):
+    target = os.getenv("TARGET_CHAT_ID", "").strip()
+    if not target:
+        logger.error("TARGET_CHAT_ID не задан")
+        return
+    chat_id = int(target)
+    try:
+        # При желании тут можно просто:
+        # await bot.send_message(chat_id, "Привет! Рассылаю карусель…")
+        await push_daily_carousel(chat_id)
+        logger.info("Initial push sent to chat %s", chat_id)
+    except Exception:
+        logger.exception("Failed to send initial push")
 
 
 def build_messages(df: pd.DataFrame) -> List[Dict]:
@@ -200,9 +229,33 @@ async def on_right(c, button, dialog_manager: DialogManager):
         dialog_manager.dialog_data["idx"] = idx + 1
 
 
+def _parse_riot_ids(raw: str) -> List[str]:
+    raw = (raw or "").strip()
+    if not raw:
+        return []
+    # 1) Пытаемся прочитать как JSON-массив: ["A","B",...]
+    try:
+        v = json.loads(raw)
+        if isinstance(v, list):
+            return [str(x).strip().strip('\'"“”„«»') for x in v if str(x).strip()]
+    except Exception:
+        pass
+    # 2) Фолбэк: CSV через запятую
+    parts = [p.strip() for p in raw.split(",")]
+    cleaned = [p.strip().strip('\'"“”„«»') for p in parts if p.strip().strip('\'"“”„«»')]
+    return cleaned
+
+RIOT_IDS = _parse_riot_ids(os.getenv("RIOT_IDS", ""))
+
+RIOT_BUTTONS = [
+    Button(Const(name), id=f"riot_{i}", on_click=on_riot_click)
+    for i, name in enumerate(RIOT_IDS)
+]
+
 view = Window(
     DynamicMedia("photo"),
     Format("{text}\n\n({pos}/{total})"),
+    # Навигация карусели
     Row(
         Button(Const("◀"), id="left",
                on_click=on_left,
@@ -210,6 +263,11 @@ view = Window(
         Button(Const("▶"), id="right",
                on_click=on_right,
                when=lambda d, *_: not d["disable_right"]),
+    ),
+    Group(
+        *RIOT_BUTTONS,
+        width=2,
+        when=lambda d, *_: bool(RIOT_BUTTONS),
     ),
     getter=getter,
     state=RecSG.show,
@@ -224,7 +282,7 @@ dp = Dispatcher()
 
 registry = setup_dialogs(dp)
 dp.include_router(dialog)
-
+dp.startup.register(on_startup)
 
 # ---------------- commands ----------------
 
@@ -252,8 +310,21 @@ async def cmd_check(m, dialog_manager: DialogManager):
     USER_MESSAGES[m.from_user.id] = msgs
     await dialog_manager.start(RecSG.show, data={"idx": 0})
 
+@dp.errors()
+async def on_dialog_errors(event: ErrorEvent):
+    exc = event.exception
+    # Клики по старым сообщениям после рестарта
+    if isinstance(exc, (OutdatedIntent, UnknownIntent)):
+        cq: CallbackQuery | None = getattr(event.update, "callback_query", None)
+        if cq:
+            with suppress(Exception):
+                # Короткий ответ без алерта, чтобы “часики” пропали
+                await cq.answer("Сообщение устарело. Откройте новую карусель (/check).", show_alert=False)
+        return True  # подавить лог/трейсбек
+
 
 async def main():
+    await bot.delete_webhook(drop_pending_updates=True)
     fetch_and_cache()
 
     loop = asyncio.get_running_loop()
@@ -270,6 +341,8 @@ async def main():
     scheduler.start()
 
     await dp.start_polling(bot)
+
+
 
 if __name__ == "__main__":
     asyncio.run(main())

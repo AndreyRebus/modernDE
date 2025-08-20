@@ -208,9 +208,11 @@ CREATE OR REPLACE TABLE iceberg.lol_raw.data_api_mining (
     "participant.wardsKilled"                     BIGINT,
     "participant.wardsPlaced"                     BIGINT,
     "participant.win"                             BOOLEAN,
-    "source_nickname"                             VARCHAR     
+    "source_nickname"                             VARCHAR,
+    "event_date"                                  DATE   
 )
 WITH (
-    format = 'PARQUET'
+    format = 'PARQUET',
+    partitioning = ARRAY['event_date']
 );
 
