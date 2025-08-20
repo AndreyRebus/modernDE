@@ -1,10 +1,10 @@
+# bot/bot.py
 from __future__ import annotations
 
 import asyncio
 import logging
 import math
 import os
-from datetime import datetime, timedelta
 from pathlib import Path
 import json
 import random
@@ -24,6 +24,9 @@ from aiogram_dialog import (
     LaunchMode,
     Window,
     setup_dialogs,
+    StartMode,
+    ShowMode,
+    GROUP_STACK_ID,
 )
 from aiogram_dialog.widgets.kbd import Row, Button, Group
 from aiogram_dialog.widgets.media import DynamicMedia
@@ -34,8 +37,8 @@ from aiogram_dialog.api.exceptions import OutdatedIntent, UnknownIntent
 from dotenv import load_dotenv
 from contextlib import suppress
 
-from templates import TEMPLATES, METRIC_COLS
-from trino_client import query_df
+from .templates import TEMPLATES, METRIC_COLS
+from .data_cache import fetch_and_cache, load_data
 
 # ─────────────────────────── logging ────────────────────────────
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -46,39 +49,49 @@ load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
 if not BOT_TOKEN:
     raise RuntimeError("BOT_TOKEN не задан (export или .env)")
-
 SPLASH_DIR = Path(os.getenv("SPLASH_DIR", "data/splashes"))
-TRINO_TABLE = os.getenv("RECORDS_TABLE", "iceberg.dbt_model.concat_record")
-DATA_DIR = Path(os.getenv("DATA_DIR", "data"))
-DATA_DIR.mkdir(parents=True, exist_ok=True)
-PARQUET_FILE = DATA_DIR / "concat_record.parquet"
-STALE_AFTER = timedelta(hours=int(os.getenv("STALE_HOURS", "6")))
+SPLASH_INDEX_PATH = Path(os.getenv("SPLASH_INDEX", "data/splashes/index.json"))
+# ───────────────────────── helpers ──────────────────────────────
 
-# ─────────────────────────── data cache ─────────────────────────
-ALL_COLUMNS: list[str] = ["source_nickname"] + METRIC_COLS + [f"{m}_meta" for m in METRIC_COLS]
+def _get_chat_id(dm: DialogManager) -> int | None:
+    # 1) сначала из dialog_data (после первого рендера всегда там)
+    cid = dm.dialog_data.get("chat_id")
+    if cid:
+        return cid
+    # 2) затем из start_data (есть при первом запуске)
+    cid = (dm.start_data or {}).get("chat_id") if hasattr(dm, "start_data") else None
+    if cid:
+        return cid
+    # 3) как крайний случай попробуем event (но при bg-старте его может не быть)
+    ev = getattr(dm, "event", None)
+    try:
+        return getattr(getattr(ev, "chat", None), "id", None)
+    except Exception:
+        return None
 
 async def getter(dialog_manager: DialogManager, **kwargs):
-    data = dialog_manager.dialog_data
-    msgs = USER_MESSAGES.get(dialog_manager.event.from_user.id, [])
-    idx = data.get("idx", 0)
+    chat_id = dialog_manager.dialog_data.get("chat_id") or (dialog_manager.start_data or {}).get("chat_id")
+    if not chat_id:
+        ev = getattr(dialog_manager, "event", None)
+        chat_id = getattr(getattr(ev, "chat", None), "id", None)
+    if chat_id:
+        dialog_manager.dialog_data["chat_id"] = chat_id
+    msgs = USER_MESSAGES.get(chat_id, []) if chat_id is not None else []
+    idx = dialog_manager.dialog_data.get("idx", 0)
     total = len(msgs)
 
     if msgs:
         item = msgs[idx]
         champion = item["champion"]
-        # ищем случайный файл вида Ahri_*.jpg / Ahri_*.png
-        files = list(SPLASH_DIR.glob(f"{champion}_*.jpg")) + list(SPLASH_DIR.glob(f"{champion}_*.png"))
-        photo = (
-            MediaAttachment(
-                path=str(random.choice(files)),
-                type="photo",
-            )
-            if files else None
-        )
+        photo = pick_splash(champion)
         current_text = item["text"]
     else:
         photo = None
         current_text = "Рекордов нет."
+
+    # держим chat_id в dialog_data, чтобы потом не искать
+    if chat_id is not None:
+        dialog_manager.dialog_data["chat_id"] = chat_id
 
     return {
         "text": current_text,
@@ -89,25 +102,6 @@ async def getter(dialog_manager: DialogManager, **kwargs):
         "disable_right": idx >= total - 1,
     }
 
-def fetch_and_cache() -> pd.DataFrame:
-    sql = f"SELECT {', '.join(ALL_COLUMNS)} FROM {TRINO_TABLE}"
-    logger.info("SQL: %s", sql)
-    df = query_df(sql)
-    df = df.loc[:, ~df.columns.duplicated()]
-    df.to_parquet(PARQUET_FILE, engine="pyarrow", index=False)
-    logger.info("Saved %d rows", len(df))
-    return df
-
-def load_data(force: bool = False) -> pd.DataFrame:
-    if force or not PARQUET_FILE.exists():
-        return fetch_and_cache()
-    mtime = datetime.utcfromtimestamp(PARQUET_FILE.stat().st_mtime)
-    if datetime.utcnow() - mtime > STALE_AFTER:
-        asyncio.create_task(fetch_and_cache())
-    return pd.read_parquet(PARQUET_FILE, engine="pyarrow")
-
-# ───────────────────────── message building ────────────────────
-
 def _split_meta(raw: str | None):
     if not raw or not isinstance(raw, str):
         return "<match>", "<champion>"
@@ -117,11 +111,8 @@ def _split_meta(raw: str | None):
     return raw, "<champion>"
 
 async def on_riot_click(c, button, dialog_manager: DialogManager):
-    # ничего не делаем, только гасим "часики" у Telegram
-    try:
+    with suppress(Exception):
         await c.answer()
-    except Exception:
-        pass
 
 def build_messages(df: pd.DataFrame) -> list[dict]:
     sent_pairs: set[tuple[str, str, str]] = set()
@@ -144,7 +135,6 @@ def build_messages(df: pd.DataFrame) -> list[dict]:
 
             match_id, champion = _split_meta(row.get(f"{metric}_meta"))
 
-            # не больше трёх ачивок на одного персонажа
             if counts.get(champion, 0) >= 3:
                 continue
 
@@ -175,7 +165,6 @@ def build_messages(df: pd.DataFrame) -> list[dict]:
 class RecSG(StatesGroup):
     show = State()
 
-# in-memory storage: user_id -> list[dict]
 USER_MESSAGES: dict[int, list[dict]] = {}
 
 async def on_startup(bot: Bot):
@@ -183,25 +172,83 @@ async def on_startup(bot: Bot):
     if not target:
         logger.error("TARGET_CHAT_ID не задан")
         return
+
     chat_id = int(target)
+
     try:
-        df = load_data(force=True)
-        USER_MESSAGES[chat_id] = build_messages(df)
+        # используем ID БОТА как user_id для bg-менеджера
+        me = await bot.get_me()
+        user_id = me.id
+        load_splash_index()
+        df = load_data(force=False)
+        msgs = build_messages(df)
+        USER_MESSAGES[chat_id] = msgs
+        logger.info("Prepared %d messages for chat %s", len(msgs), chat_id)
 
-        dm = registry.bg(bot=bot, user_id=chat_id, chat_id=chat_id)
-        await dm.start(RecSG.show, data={"idx": 0})
+        dm = registry.bg(
+            bot=bot,
+            user_id=user_id,        # <-- ID бота
+            chat_id=chat_id,
+            stack_id=GROUP_STACK_ID, # <-- общий стек чата
+            load=True,
+        )
 
+        await dm.start(
+            RecSG.show,
+            data={"idx": 0, "chat_id": chat_id},  # <-- чтобы getter знал ключ
+            mode=StartMode.RESET_STACK,
+            show_mode=ShowMode.SEND,              # <-- отправляем новое сообщение
+        )
         logger.info("Initial push sent to chat %s", chat_id)
     except Exception:
         logger.exception("Failed to send initial push")
 
+# champion -> list[str absolute paths]
+CHAMP_SPLASHES: dict[str, list[str]] = {}
+
+def load_splash_index() -> None:
+    """Разово читаем index.json в память."""
+    global CHAMP_SPLASHES
+    try:
+        with open(SPLASH_INDEX_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        # нормализуем и фильтруем
+        CHAMP_SPLASHES = {
+            str(k): [str(p) for p in v if isinstance(p, str)]
+            for k, v in (data or {}).items()
+            if isinstance(v, list)
+        }
+        logger.info("Splash index: %d champions loaded from %s", len(CHAMP_SPLASHES), SPLASH_INDEX_PATH)
+    except FileNotFoundError:
+        logger.warning("Splash index file %s not found; fallback to FS scan.", SPLASH_INDEX_PATH)
+        CHAMP_SPLASHES = {}
+    except Exception:
+        logger.exception("Failed to load splash index")
+        CHAMP_SPLASHES = {}
+
+def pick_splash(champion: str) -> MediaAttachment | None:
+    """Берём случайную картинку из индекса. Если героя нет — мягкий фолбэк на сканирование."""
+    if not champion:
+        return None
+    files = CHAMP_SPLASHES.get(champion)
+    if files:
+        path = random.choice(files)
+        return MediaAttachment(path=path, type="photo")
+    # мягкий фолбэк, если индекс не содержит героя
+    files2 = list(SPLASH_DIR.glob(f"{champion}_*.jpg")) + list(SPLASH_DIR.glob(f"{champion}_*.png"))
+    if files2:
+        return MediaAttachment(path=str(random.choice(files2)), type="photo")
+    return None
+
 
 async def on_left(c, button, dialog_manager: DialogManager):
-    if dialog_manager.dialog_data.get("idx", 0) > 0:
-        dialog_manager.dialog_data["idx"] -= 1
+    idx = dialog_manager.dialog_data.get("idx", 0)
+    if idx > 0:
+        dialog_manager.dialog_data["idx"] = idx - 1
 
 async def on_right(c, button, dialog_manager: DialogManager):
-    msgs = USER_MESSAGES.get(dialog_manager.event.from_user.id, [])
+    chat_id = dialog_manager.dialog_data.get("chat_id")
+    msgs = USER_MESSAGES.get(chat_id, []) if chat_id is not None else []
     idx = dialog_manager.dialog_data.get("idx", 0)
     if idx < len(msgs) - 1:
         dialog_manager.dialog_data["idx"] = idx + 1
@@ -210,14 +257,12 @@ def _parse_riot_ids(raw: str) -> list[str]:
     raw = (raw or "").strip()
     if not raw:
         return []
-    # 1) Пытаемся прочитать как JSON-массив: ["A","B",...]
     try:
         v = json.loads(raw)
         if isinstance(v, list):
             return [str(x).strip().strip('\'"“”„«»') for x in v if str(x).strip()]
     except Exception:
         pass
-    # 2) Фолбэк: CSV через запятую
     parts = [p.strip() for p in raw.split(",")]
     cleaned = [p.strip().strip('\'"“”„«»') for p in parts if p.strip().strip('\'"“”„«»')]
     return cleaned
@@ -232,7 +277,6 @@ RIOT_BUTTONS = [
 view = Window(
     DynamicMedia("photo"),
     Format("{text}\n\n({pos}/{total})"),
-    # Навигация карусели
     Row(
         Button(Const("◀"), id="left",
                on_click=on_left,
@@ -253,7 +297,6 @@ view = Window(
 dialog = Dialog(view, launch_mode=LaunchMode.ROOT)
 
 # ───────────────────────── aiogram runtime ─────────────────────
-
 bot = Bot(BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
 
@@ -261,8 +304,7 @@ registry = setup_dialogs(dp)
 dp.include_router(dialog)
 dp.startup.register(on_startup)
 
-# ---------------- commands ----------------
-
+# ---------------- команды ----------------
 @dp.message(Command("refresh"))
 async def cmd_refresh(m):
     await m.answer("🔄 Обновляю данные…")
@@ -273,22 +315,21 @@ async def cmd_refresh(m):
         logger.exception("Ошибка обновления")
         await m.answer(f"❌ Ошибка обновления: {e}")
 
-@dp.message(Command("check"))
-async def cmd_check(m, dialog_manager: DialogManager):
-    try:
-        df = load_data()
-        msgs = build_messages(df)
-    except Exception as e:
-        logger.exception("Ошибка выборки")
-        await m.answer(f"❌ Ошибка выборки: {e}")
-        return
+# ---------------- обработка ошибок ----------------
+@dp.errors()
+async def on_dialog_errors(event: ErrorEvent):
+    exc = event.exception
+    if isinstance(exc, (OutdatedIntent, UnknownIntent)):
+        cq: CallbackQuery | None = getattr(event.update, "callback_query", None)
+        if cq:
+            with suppress(Exception):
+                await cq.answer("Сообщение устарело. Используйте последнюю карусель.", show_alert=False)
+        return True
 
-    USER_MESSAGES[m.from_user.id] = msgs
-    await dialog_manager.start(RecSG.show, data={"idx": 0})
-
+# ---------------- main ----------------
 async def main():
     await bot.delete_webhook(drop_pending_updates=True)
-    fetch_and_cache()
+    asyncio.create_task(asyncio.to_thread(fetch_and_cache))
     await dp.start_polling(bot)
 
 if __name__ == "__main__":

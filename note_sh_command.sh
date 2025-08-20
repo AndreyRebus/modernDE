@@ -22,3 +22,14 @@ docker run --rm \
   --env-file .env \
   -v "$PWD/bot/data/splashes:/app/bot/data/splashes:ro" \
   bot
+
+docker build -f Dockerfile.deps -t bot-deps .
+
+docker run --rm \
+  --name bot \
+  --env-file .env \
+  -w /app \
+  -v "$PWD/bot:/app/bot" \
+  -v "$PWD/data:/app/data" \
+  -v "$PWD/bot/data/splashes:/app/data/splashes:ro" \
+  bot-deps bash -lc 'python -m bot.prefetch && exec python -m bot.bot'

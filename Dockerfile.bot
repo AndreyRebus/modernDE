@@ -1,34 +1,19 @@
-# Минимальный образ
-FROM python:3.12-slim
+FROM python:3.11-slim
 
-ENV PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1 \
-    DEBIAN_FRONTEND=noninteractive
+WORKDIR /app
 
-# Для ZoneInfo по TZ
-RUN apt-get update && apt-get install -y --no-install-recommends tzdata \
-  && rm -rf /var/lib/apt/lists/*
+# зависимости
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Рабочая директория: внутри проекта — это /app/bot
-WORKDIR /app/bot
+# код
+COPY bot/ ./bot/
+COPY entrypoint.sh .
+RUN chmod +x entrypoint.sh
 
-# Зависимости проекта: aiogram v3, aiogram-dialog v2, parquet, trino-client, dotenv, APScheduler
-RUN pip install --no-cache-dir \
-    "aiogram>=3,<4" \
-    "aiogram-dialog>=2,<3" \
-    pandas \
-    pyarrow \
-    python-dotenv \
-    APScheduler \
-    trino
+ENV PYTHONUNBUFFERED=1
 
-# Копируем ТОЛЬКО нужные файлы
-COPY bot/bot.py /app/bot/bot.py
-COPY bot/trino_client.py /app/bot/trino_client.py
-COPY bot/templates.py /app/bot/templates.py
+# запуск: сначала префетч, потом бот
+ENTRYPOINT ["./entrypoint.sh"]
 
-# Подготовим директорию data (сюда пишется parquet; подкаталог splashes смонтируем при запуске)
-RUN mkdir -p /app/bot/data
-
-# Запуск бота; будет работать, пока контейнер не остановят
-CMD ["python", "-u", "bot.py"]
+CMD ["bash","-lc","python -m bot.prefetch && exec python -m bot.bot"]
