@@ -12,3 +12,4 @@ boto3
 requests
 urllib3
 pyiceberg
+pyiceberg[sql-postgres]
