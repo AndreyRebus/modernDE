@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 
 import io
 import logging
@@ -82,7 +83,7 @@ META_COLS: List[str] = [
     "info.gameVersion",
 ]
 
-FULL_TABLE = f'{TRINO_CATALOG}.{TRINO_SCHEMA}.{TRINO_TABLE}'
+FULL_TABLE = f"{TRINO_CATALOG}.{TRINO_SCHEMA}.{TRINO_TABLE}"
 
 # ────────────────── Trino helpers ──────────────────
 
@@ -110,45 +111,14 @@ def exec_sql(sql: str) -> List[tuple]:
             rows = []
     return rows
 
-def try_add_files_direct(location: str) -> bool:
-    """Пытается выполнить ALTER TABLE … EXECUTE add_files(...) прямо в целевую таблицу.
-       Возвращает True при успехе или «уже подключено», False — если надо падать в staging."""
-    sql = f"""
-        ALTER TABLE {FULL_TABLE}
-        EXECUTE add_files(
-            location => '{location}',
-            format   => 'PARQUET'
-        )
-    """
-    try:
-        exec_sql(sql)
-        logging.info("📎 add_files → %s: OK", location)
-        return True
-    except Exception as exc:
-        msg = str(exc)
-        # Уже зарегистрировано — считаем успехом
-        if ("File already exists" in msg) or ("already registered" in msg):
-            logging.info("ℹ️ add_files: files at %s already registered", location)
-            return True
-        # Ограничение процедуры на партиционированных таблицах — надо идти через staging
-        not_supported = (
-            "does not support partitioned tables" in msg.lower()
-            or "invalid_procedure_argument" in msg.lower()
-            or "not supported" in msg.lower() and "partition" in msg.lower()
-        )
-        if not_supported:
-            logging.info("↪️ add_files not supported for partitioned table → will use staging")
-            return False
-        # Иная ошибка — пробрасываем
-        logging.exception("💥 add_files failed for %s", location)
-        raise
-
 def ingest_via_staging(location: str) -> None:
-    """Импорт через временную непартиционированную таблицу:
-       1) CREATE TABLE …_stg (LIKE target EXCLUDING PROPERTIES) WITH (format='PARQUET')
-       2) add_files в staging
-       3) INSERT INTO target SELECT * FROM staging
-       4) UNREGISTER staging (файлы в S3 сохраняются)
+    """
+    Универсальный импорт новых файлов через временную непартиционированную таблицу:
+      1) CREATE TABLE …_stg (LIKE target EXCLUDING PROPERTIES) WITH (format='PARQUET')
+      2) ALTER TABLE …_stg EXECUTE add_files(location, 'PARQUET')
+      3) INSERT INTO target SELECT * FROM …_stg
+      4) CALL system.unregister_table(schema_name, table_name)
+    Используем ТОЛЬКО для НОВЫХ файлов (когда в S3 ранее не было parquet в папке).
     """
     stg_name = f"{TRINO_TABLE}__stg_{int(time.time())}_{uuid.uuid4().hex[:8]}"
     full_stg = f"{TRINO_CATALOG}.{TRINO_SCHEMA}.{stg_name}"
@@ -176,7 +146,7 @@ def ingest_via_staging(location: str) -> None:
 
         # 3) Перекладка в целевую таблицу
         insert_sql = f"INSERT INTO {FULL_TABLE} SELECT * FROM {full_stg}"
-        rows = exec_sql(insert_sql)
+        exec_sql(insert_sql)
         logging.info("📥 INSERT INTO %s FROM %s: OK", FULL_TABLE, full_stg)
 
     finally:
@@ -190,14 +160,6 @@ def ingest_via_staging(location: str) -> None:
             logging.info("🧹 Unregistered staging table %s (S3 files preserved)", full_stg)
         except Exception:
             logging.warning("⚠️ Failed to unregister staging table %s — please clean up manually", full_stg)
-
-def register_location_safely(location: str) -> None:
-    """Главная точка регистрации файлов:
-       — попытаться add_files напрямую;
-       — при неудаче из-за партиций — staging-импорт с последующим unregister."""
-    direct_ok = try_add_files_direct(location)
-    if not direct_ok:
-        ingest_via_staging(location)
 
 # ────────────────── HTTP helper ──────────────────
 
@@ -238,7 +200,15 @@ def fetch_matches_once_per_day(
     *,
     rate_delay: float = 1.2,
 ) -> Optional[str]:
-    """Возвращает ключ S3 либо None."""
+    """
+    Возвращает ключ S3 либо None.
+
+    ВАЖНО:
+      • Если parquet-файл(ы) в S3 уже существуют для папки дня/аккаунта — пропускаем загрузку в таблицу (никакого INSERT),
+        чтобы избежать дублей. Только логируем и выходим.
+      • Если parquet-файлов ещё нет — вызываем Riot API, сохраняем новый parquet и
+        РЕГИСТРИРУЕМ ЕГО ТОЛЬКО ЧЕРЕЗ STAGING (ingest_via_staging).
+    """
 
     # S3 session
     session = boto3.session.Session(
@@ -254,12 +224,12 @@ def fetch_matches_once_per_day(
     safe_riot_id = riot_id_clean.replace("#", "_")
     s3_folder = f"{S3_PREFIX}/{folder_date}/{safe_riot_id}/"
 
-    # Если найдены существующие parquet-файлы — подцепляем и выходим
-    existing = [obj.key for obj in bucket.objects.filter(Prefix=s3_folder) if obj.key.endswith('.parquet')]
+    # Если найдены существующие parquet-файлы — НИЧЕГО не вставляем
+    existing = [obj.key for obj in bucket.objects.filter(Prefix=s3_folder) if obj.key.endswith(".parquet")]
     if existing:
-        logging.info("🔁 %s: found existing parquet files: %s", folder_date, existing)
-        location = f"s3://{S3_BUCKET_NAME}/{s3_folder.rstrip('/')}"
-        register_location_safely(location)
+        logging.info("🔁 %s: found existing parquet in S3 for %s → skip DB INSERT. Files: %s",
+                     folder_date, riot_id_clean, existing)
+        # Ничего не регистрируем и не инсертим — выходим
         return existing[0]
 
     headers = {"X-Riot-Token": RIOT_API_KEY}
@@ -323,9 +293,9 @@ def fetch_matches_once_per_day(
     s3.Object(S3_BUCKET_NAME, object_key).upload_fileobj(buf)
     logging.info("✅ %s: uploaded %s rows → %s", folder_date, len(df), object_key)
 
-    # Регистрируем файлы
+    # Регистрируем НОВЫЕ файлы ТОЛЬКО через staging
     location = f"s3://{S3_BUCKET_NAME}/{s3_folder.rstrip('/')}"
-    register_location_safely(location)
+    ingest_via_staging(location)
 
     return object_key
 
@@ -350,4 +320,4 @@ if __name__ == "__main__":
                 fetch_matches_once_per_day(riot_id=riot, load_date=day)
             except Exception:
                 logging.exception("💥 Critical error on %s for %s", day, riot)
-            time.sleep(2)
+

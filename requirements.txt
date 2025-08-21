@@ -4,3 +4,11 @@ pandas
 pyarrow
 python-dotenv
 trino
+
+plotly>=5.20
+kaleido==0.2.1
+
+boto3
+requests
+urllib3
+pyiceberg

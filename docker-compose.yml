@@ -1,5 +1,4 @@
 services:
-
   controller:
     image: 'trinodb/trino'
     hostname: trino
@@ -10,7 +9,7 @@ services:
       - ./etc/password.db:/etc/trino/password.db
       - ./etc/keystore.p12:/etc/trino/keystore.p12
     ports:
-      - "8443:8443" 
+      - "8443:8443"
     depends_on:
       postgres:
         condition: service_healthy
@@ -43,19 +42,45 @@ services:
     environment:
       DAGSTER_HOME: /opt/dagster/dagster_home
     volumes:
-      - ./dagster_project:/opt/dagster/app          # ваш код
-      - ./dagster_home:/opt/dagster/dagster_home    # метаданные Dagster
-    working_dir: /opt/dagster/app                   # ← запускаемся прямо в каталоге проекта
+      - ./dagster_project:/opt/dagster/app
+      - ./dagster_home:/opt/dagster/dagster_home
+    working_dir: /opt/dagster/app
     command: >
       bash -c "pip install --no-cache -r requirements.txt &&
-              dagster dev -p 3000 -h 0.0.0.0"      # аргумент-каталог убран
+               dagster dev -p 3000 -h 0.0.0.0"
     ports:
       - '3000:3000'
-  
+    networks:
+      - trino_network
+
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile.deps      # твой Dockerfile из сообщения
+    image: bot-deps                    # тег, если хочешь переиспользовать
+    container_name: bot
+    working_dir: /app
+    env_file: .env
+    # при желании зафиксируй директорию для графиков:
+    environment:
+      - IMAGE_DIR=bot/data/image
+    command: >
+      bash -lc "python -m bot.prefetch &&
+                python -m bot.kda_charts &&
+                exec python -m bot.bot"
+    volumes:
+      - ./bot:/app/bot
+      - ./data:/app/data
+      - ./bot/data/splashes:/app/data/splashes:ro
+    depends_on:
+      - controller
+    restart: unless-stopped
+    networks:
+      - trino_network
+
 networks:
   trino_network:
     driver: bridge
-
 
 volumes:
   postgres-db-volume:

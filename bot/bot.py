@@ -8,6 +8,8 @@ import os
 from pathlib import Path
 import json
 import random
+import unicodedata
+import re
 
 import pandas as pd
 from aiogram import Bot, Dispatcher
@@ -51,6 +53,8 @@ if not BOT_TOKEN:
     raise RuntimeError("BOT_TOKEN не задан (export или .env)")
 SPLASH_DIR = Path(os.getenv("SPLASH_DIR", "data/splashes"))
 SPLASH_INDEX_PATH = Path(os.getenv("SPLASH_INDEX", "data/splashes/index.json"))
+IMAGE_DIR = Path(os.getenv("IMAGE_DIR", "bot/data/image"))
+MAX_RECORDS_PER_PLAYER = int(os.getenv("MAX_RECORDS_PER_PLAYER", "5"))
 # ───────────────────────── helpers ──────────────────────────────
 
 def _get_chat_id(dm: DialogManager) -> int | None:
@@ -70,37 +74,77 @@ def _get_chat_id(dm: DialogManager) -> int | None:
         return None
 
 async def getter(dialog_manager: DialogManager, **kwargs):
+    # режим
+    mode = dialog_manager.dialog_data.get("mode", "carousel")
+
+    # chat_id держим в dialog_data (нам его кладёт on_startup в data)
     chat_id = dialog_manager.dialog_data.get("chat_id") or (dialog_manager.start_data or {}).get("chat_id")
-    if not chat_id:
-        ev = getattr(dialog_manager, "event", None)
-        chat_id = getattr(getattr(ev, "chat", None), "id", None)
     if chat_id:
         dialog_manager.dialog_data["chat_id"] = chat_id
+
     msgs = USER_MESSAGES.get(chat_id, []) if chat_id is not None else []
     idx = dialog_manager.dialog_data.get("idx", 0)
     total = len(msgs)
 
-    if msgs:
-        item = msgs[idx]
-        champion = item["champion"]
-        photo = pick_splash(champion)
-        current_text = item["text"]
+    if mode == "chart":
+        # показываем график выбранного игрока
+        player = dialog_manager.dialog_data.get("chart_player")
+        photo = pick_chart(player)
+        # текст оставим прежним (или можно подсветить игрока)
+        current_text = f"График: {player}" if player else "График недоступен."
+        show_back = True
+        disable_left = disable_right = True
     else:
-        photo = None
-        current_text = "Рекордов нет."
-
-    # держим chat_id в dialog_data, чтобы потом не искать
-    if chat_id is not None:
-        dialog_manager.dialog_data["chat_id"] = chat_id
+        # обычная карусель
+        if msgs:
+            item = msgs[idx]
+            champion = item["champion"]
+            photo = pick_splash(champion) if 'pick_splash' in globals() else None
+            # если нет индекса сплэшей — старый фолбэк по файлам
+            if photo is None:
+                files = list(SPLASH_DIR.glob(f"{champion}_*.jpg")) + list(SPLASH_DIR.glob(f"{champion}_*.png"))
+                photo = MediaAttachment(path=str(random.choice(files)), type="photo") if files else None
+            current_text = item["text"]
+        else:
+            photo = None
+            current_text = "Рекордов нет."
+        show_back = False
+        disable_left = idx == 0
+        disable_right = idx >= total - 1
 
     return {
         "text": current_text,
         "photo": photo,
         "pos": idx + 1,
         "total": total,
-        "disable_left": idx == 0,
-        "disable_right": idx >= total - 1,
+        "disable_left": disable_left,
+        "disable_right": disable_right,
+        "show_nav": mode == "carousel",
+        "show_back": show_back,
     }
+
+
+SAFE = re.compile(r"[^\w.\-]", re.UNICODE)
+
+def _safe_name(nick: str) -> str:
+    # как в kda_charts.py: сохраняем Unicode, заменяем # и пробелы на _
+    name = unicodedata.normalize("NFC", str(nick))
+    name = name.replace("#", "_")
+    name = re.sub(r"\s+", "_", name, flags=re.UNICODE)
+    name = re.sub(r'[\/\\:*?"<>|]', "_", name)
+    name = re.sub(r"[^\w.\-]", "_", name, flags=re.UNICODE)
+    name = re.sub(r"_+", "_", name).strip("._-")
+    return name or "player"
+
+def pick_chart(nickname: str) -> MediaAttachment | None:
+    """Берём JPG графика из IMAGE_DIR по нику-кнопке."""
+    if not nickname:
+        return None
+    fname = _safe_name(nickname) + ".jpg"
+    path = IMAGE_DIR / fname
+    if path.exists():
+        return MediaAttachment(path=str(path), type="photo")
+    return None
 
 def _split_meta(raw: str | None):
     if not raw or not isinstance(raw, str):
@@ -111,12 +155,27 @@ def _split_meta(raw: str | None):
     return raw, "<champion>"
 
 async def on_riot_click(c, button, dialog_manager: DialogManager):
+    # из id кнопки узнаём ник
+    name = RIOT_BTN_TO_NAME.get(button.widget_id)
+    dialog_manager.dialog_data.update({
+        "mode": "chart",
+        "chart_player": name,
+    })
+    with suppress(Exception):
+        await c.answer()
+
+async def on_back(c, button, dialog_manager: DialogManager):
+    dialog_manager.dialog_data.update({
+        "mode": "carousel",
+        "chart_player": None,
+    })
     with suppress(Exception):
         await c.answer()
 
 def build_messages(df: pd.DataFrame) -> list[dict]:
     sent_pairs: set[tuple[str, str, str]] = set()
-    counts: dict[str, int] = {}
+    champ_counts: dict[str, int] = {}     # лимит по чемпиону (как было: не больше 3)
+    player_counts: dict[str, int] = {}    # НОВОЕ: лимит сообщений на игрока
     out: list[dict] = []
 
     for _, row in df.iterrows():
@@ -126,7 +185,15 @@ def build_messages(df: pd.DataFrame) -> list[dict]:
         if not isinstance(nick, str) or not nick:
             continue
 
+        # если по этому игроку уже набрали лимит — пропускаем все его оставшиеся строки
+        if player_counts.get(nick, 0) >= MAX_RECORDS_PER_PLAYER:
+            continue
+
         for metric in METRIC_COLS:
+            # проверка лимита на игрока — ещё раз внутри цикла (на случай нескольких метрик)
+            if player_counts.get(nick, 0) >= MAX_RECORDS_PER_PLAYER:
+                break
+
             val = row.get(metric)
             if val in (None, "", "0") or (
                 isinstance(val, (int, float)) and (val == 0 or math.isnan(val))
@@ -135,7 +202,8 @@ def build_messages(df: pd.DataFrame) -> list[dict]:
 
             match_id, champion = _split_meta(row.get(f"{metric}_meta"))
 
-            if counts.get(champion, 0) >= 3:
+            # как и раньше: не больше 3 ачивок на одного чемпиона
+            if champ_counts.get(champion, 0) >= 3:
                 continue
 
             key = (nick, metric, match_id)
@@ -157,7 +225,9 @@ def build_messages(df: pd.DataFrame) -> list[dict]:
             )
             out.append({"text": text, "champion": champion})
 
-            counts[champion] = counts.get(champion, 0) + 1
+            # инкременты счётчиков
+            champ_counts[champion] = champ_counts.get(champion, 0) + 1
+            player_counts[nick] = player_counts.get(nick, 0) + 1
 
     return out
 
@@ -269,10 +339,16 @@ def _parse_riot_ids(raw: str) -> list[str]:
 
 RIOT_IDS = _parse_riot_ids(os.getenv("RIOT_IDS", ""))
 
-RIOT_BUTTONS = [
-    Button(Const(name), id=f"riot_{i}", on_click=on_riot_click)
-    for i, name in enumerate(RIOT_IDS)
-]
+RIOT_IDS = _parse_riot_ids(os.getenv("RIOT_IDS", ""))
+
+RIOT_BTN_TO_NAME: dict[str, str] = {}
+RIOT_BUTTONS = []
+for i, name in enumerate(RIOT_IDS):
+    btn_id = f"riot_{i}"
+    RIOT_BTN_TO_NAME[btn_id] = name
+    RIOT_BUTTONS.append(Button(Const(name), id=btn_id, on_click=on_riot_click))
+
+BACK_BUTTON = Button(Const("↩️ Назад"), id="back", on_click=on_back)
 
 view = Window(
     DynamicMedia("photo"),
@@ -280,11 +356,16 @@ view = Window(
     Row(
         Button(Const("◀"), id="left",
                on_click=on_left,
-               when=lambda d, *_: not d["disable_left"]),
+               when=lambda d, *_: d.get("show_nav") and not d["disable_left"]),
         Button(Const("▶"), id="right",
                on_click=on_right,
-               when=lambda d, *_: not d["disable_right"]),
+               when=lambda d, *_: d.get("show_nav") and not d["disable_right"]),
     ),
+    Row(
+        BACK_BUTTON,
+        when=lambda d, *_: d.get("show_back"),
+    ),
+
     Group(
         *RIOT_BUTTONS,
         width=2,
