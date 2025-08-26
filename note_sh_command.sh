@@ -30,3 +30,42 @@ docker run --rm \
   -v "$PWD/data:/app/data" \
   -v "$PWD/bot/data/splashes:/app/data/splashes:ro" \
   bot-deps bash -lc 'python -m bot.prefetch && exec python -m bot.bot'
+
+
+docker compose rm -sf bot && docker compose up -d bot
+docker compose up -d --force-recreate --no-deps bot
+
+
+
+
+
+docker build -f Dockerfile.unified -t md-unified .
+
+
+docker run --rm -it \
+  --network modernde_trino_network \
+  --env-file ./.env \
+  -v "$(pwd)/lol_dbt_project:/workspace" \
+  md-unified \
+  dbt run --project-dir /workspace
+
+
+docker run --rm \
+  --network modernde_trino_network \
+  --env-file ./.env \
+  -v "$(pwd):/workspace" \
+  md-unified \
+  python load.py
+
+
+  docker run --rm \
+  -v "$(pwd)/bot:/workspace/bot" \
+  -v "/home/modernDE/bot/data/splashes:/workspace/data/splashes" \
+  md-unified \
+  python -m bot.splashes
+
+
+  cd /home/modernDE && \
+docker run --rm --network modernde_trino_network --env-file ./.env -v "$(pwd):/workspace" md-unified python load.py && \
+docker run --rm --network modernde_trino_network --env-file ./.env -v "$(pwd)/lol_dbt_project:/workspace" md-unified dbt run --project-dir /workspace && \
+docker compose up -d --force-recreate --no-deps bot

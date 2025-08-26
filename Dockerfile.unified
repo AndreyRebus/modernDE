@@ -1,0 +1,61 @@
+# syntax=docker/dockerfile:1.6
+
+########## 1) Builder: ставим зависимости в системный site-packages ##########
+FROM python:3.12-slim AS builder
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ca-certificates git build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# В контексте сборки должен быть requirements.txt из корня проекта
+COPY requirements.txt /tmp/requirements.txt
+
+# Кэшируем pip между сборками
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python -m pip install --upgrade pip && \
+    pip install --no-cache-dir -r /tmp/requirements.txt
+
+########## 2) Runtime: только то, что нужно ##########
+FROM python:3.12-slim AS runtime
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ca-certificates fonts-noto-core fonts-dejavu-core \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+WORKDIR /workspace
+
+# Копируем установленный Python слой из builder (бинарники + site-packages)
+# Этого достаточно, чтобы все зависимости были в рантайме.
+COPY --from=builder /usr/local /usr/local
+
+# dbt будет искать профили здесь (можно переопределить при запуске)
+ENV DBT_PROFILES_DIR=/root/.dbt
+
+# Имя dbt-проекта в profiles.yml. Можно задать на сборке:
+#   docker build --build-arg DBT_PROJECT_NAME=lol_dbt_project -t md-unified .
+ARG DBT_PROJECT_NAME=lol_dbt_project
+
+# Генерим profiles.yml с Jinja-шаблонами env_var(...) — значения подставятся на РАНТАЙМЕ из твоего .env
+RUN mkdir -p "${DBT_PROFILES_DIR}" && \
+    cat > "${DBT_PROFILES_DIR}/profiles.yml" <<YAML
+${DBT_PROJECT_NAME}:
+  target: dev
+  outputs:
+    dev:
+      type: trino
+      method: ldap
+      host: "{{ env_var('TRINO_HOST') }}"
+      port: "{{ env_var('TRINO_PORT', 8443) | as_number }}"
+      user: "{{ env_var('TRINO_USER') }}"
+      password: "{{ env_var('TRINO_PASSWORD') }}"
+      http_scheme: https
+      verify: false
+      database: "{{ env_var('TRINO_CATALOG') }}"
+      schema: "{{ env_var('DBT_SCHEMA') }}"
+      threads: "{{ env_var('DBT_THREADS', 1) | as_number }}"
+YAML
+
+# Никакого entrypoint — запускаем команду напрямую

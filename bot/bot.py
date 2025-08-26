@@ -11,6 +11,7 @@ import random
 import unicodedata
 import re
 
+
 import pandas as pd
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
@@ -19,6 +20,7 @@ from aiogram.filters import Command
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types.error_event import ErrorEvent
 from aiogram.types import CallbackQuery
+from aiogram.enums import ContentType
 
 from aiogram_dialog import (
     Dialog,
@@ -45,6 +47,8 @@ from .data_cache import fetch_and_cache, load_data
 # ─────────────────────────── logging ────────────────────────────
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
+logging.getLogger("aiogram").setLevel(logging.DEBUG)
+logging.getLogger("aiogram_dialog").setLevel(logging.DEBUG)
 
 # ─────────────────────────── config ─────────────────────────────
 load_dotenv()
@@ -55,6 +59,13 @@ SPLASH_DIR = Path(os.getenv("SPLASH_DIR", "data/splashes"))
 SPLASH_INDEX_PATH = Path(os.getenv("SPLASH_INDEX", "data/splashes/index.json"))
 IMAGE_DIR = Path(os.getenv("IMAGE_DIR", "bot/data/image"))
 MAX_RECORDS_PER_PLAYER = int(os.getenv("MAX_RECORDS_PER_PLAYER", "5"))
+TARGET_USER_ID = int(os.getenv("TARGET_USER_ID", "0"))
+THREAD_ID = int(os.getenv("THREAD_ID", "0")) or None           # если вдруг включат топики — можно указать
+DEBUG_START_PING = os.getenv("DEBUG_START_PING", "0").lower() in ("1","true","yes")
+DEBUG_PING_KEEP = os.getenv("DEBUG_PING_KEEP", "0").lower() in ("1","true","yes")
+DISABLE_SPLASH = os.getenv("DISABLE_SPLASH", "0").lower() in ("1","true","yes")
+FORCE_START_MESSAGE = os.getenv("FORCE_START_MESSAGE", "0").lower() in ("1","true","yes")
+
 # ───────────────────────── helpers ──────────────────────────────
 
 def _get_chat_id(dm: DialogManager) -> int | None:
@@ -74,55 +85,62 @@ def _get_chat_id(dm: DialogManager) -> int | None:
         return None
 
 async def getter(dialog_manager: DialogManager, **kwargs):
-    # режим
-    mode = dialog_manager.dialog_data.get("mode", "carousel")
+    try:
+        mode = dialog_manager.dialog_data.get("mode", "carousel")
+        chat_id = dialog_manager.dialog_data.get("chat_id") or (dialog_manager.start_data or {}).get("chat_id")
+        if chat_id:
+            dialog_manager.dialog_data["chat_id"] = chat_id
 
-    # chat_id держим в dialog_data (нам его кладёт on_startup в data)
-    chat_id = dialog_manager.dialog_data.get("chat_id") or (dialog_manager.start_data or {}).get("chat_id")
-    if chat_id:
-        dialog_manager.dialog_data["chat_id"] = chat_id
+        msgs = USER_MESSAGES.get(chat_id, []) if chat_id is not None else []
+        idx = dialog_manager.dialog_data.get("idx", 0)
+        total = len(msgs)
 
-    msgs = USER_MESSAGES.get(chat_id, []) if chat_id is not None else []
-    idx = dialog_manager.dialog_data.get("idx", 0)
-    total = len(msgs)
-
-    if mode == "chart":
-        # показываем график выбранного игрока
-        player = dialog_manager.dialog_data.get("chart_player")
-        photo = pick_chart(player)
-        # текст оставим прежним (или можно подсветить игрока)
-        current_text = f"График: {player}" if player else "График недоступен."
-        show_back = True
-        disable_left = disable_right = True
-    else:
-        # обычная карусель
-        if msgs:
-            item = msgs[idx]
-            champion = item["champion"]
-            photo = pick_splash(champion) if 'pick_splash' in globals() else None
-            # если нет индекса сплэшей — старый фолбэк по файлам
-            if photo is None:
-                files = list(SPLASH_DIR.glob(f"{champion}_*.jpg")) + list(SPLASH_DIR.glob(f"{champion}_*.png"))
-                photo = MediaAttachment(path=str(random.choice(files)), type="photo") if files else None
-            current_text = item["text"]
+        if mode == "chart":
+            player = dialog_manager.dialog_data.get("chart_player")
+            photo = pick_chart(player)
+            current_text = f"График: {player}" if player else "График недоступен."
+            show_back = True
+            disable_left = disable_right = True
         else:
-            photo = None
-            current_text = "Рекордов нет."
-        show_back = False
-        disable_left = idx == 0
-        disable_right = idx >= total - 1
+            if msgs:
+                item = msgs[idx]
+                champion = item["champion"]
+                photo = None
+                if not DISABLE_SPLASH:
+                    photo = pick_splash(champion) if 'pick_splash' in globals() else None
+                    if photo is None:
+                        files = list(SPLASH_DIR.glob(f"{champion}_*.jpg")) + list(SPLASH_DIR.glob(f"{champion}_*.png"))
+                        photo = MediaAttachment(type=ContentType.PHOTO, path=str(random.choice(files))) if files else None
+                current_text = item["text"]
+            else:
+                photo = None
+                current_text = "Рекордов нет."
+            show_back = False
+            disable_left = idx == 0
+            disable_right = idx >= total - 1
 
-    return {
-        "text": current_text,
-        "photo": photo,
-        "pos": idx + 1,
-        "total": total,
-        "disable_left": disable_left,
-        "disable_right": disable_right,
-        "show_nav": mode == "carousel",
-        "show_back": show_back,
-    }
-
+        return {
+            "text": current_text or "…",
+            "photo": photo,
+            "pos": idx + 1,
+            "total": total,
+            "disable_left": disable_left,
+            "disable_right": disable_right,
+            "show_nav": mode == "carousel",
+            "show_back": show_back,
+        }
+    except Exception as e:
+        logger.exception("getter failed")
+        return {
+            "text": f"⚠️ Ошибка рендера: {e}",
+            "photo": None,
+            "pos": 0,
+            "total": 0,
+            "disable_left": True,
+            "disable_right": True,
+            "show_nav": False,
+            "show_back": False,
+        }
 
 SAFE = re.compile(r"[^\w.\-]", re.UNICODE)
 
@@ -143,7 +161,7 @@ def pick_chart(nickname: str) -> MediaAttachment | None:
     fname = _safe_name(nickname) + ".jpg"
     path = IMAGE_DIR / fname
     if path.exists():
-        return MediaAttachment(path=str(path), type="photo")
+        return MediaAttachment(type=ContentType.PHOTO, path=str(path))
     return None
 
 def _split_meta(raw: str | None):
@@ -244,32 +262,56 @@ async def on_startup(bot: Bot):
         return
 
     chat_id = int(target)
-
     try:
-        # используем ID БОТА как user_id для bg-менеджера
-        me = await bot.get_me()
-        user_id = me.id
+        # Логируем, в какой чат шлём
+        try:
+            ch = await bot.get_chat(chat_id)
+            logger.info("Target chat resolved: title=%r type=%s id=%s", getattr(ch, "title", None), getattr(ch, "type", None), chat_id)
+        except Exception:
+            logger.exception("get_chat failed")
+
         load_splash_index()
-        df = load_data(force=False)
+        df = load_data(False)
         msgs = build_messages(df)
         USER_MESSAGES[chat_id] = msgs
         logger.info("Prepared %d messages for chat %s", len(msgs), chat_id)
 
+        # user_id для контекста
+        me = await bot.get_me()
+        user_id = TARGET_USER_ID or me.id
+        logger.info("Using context user_id=%s", user_id)
+
+        # Опциональный пинг
+        if DEBUG_START_PING:
+            ping = await bot.send_message(chat_id, f"🔎 ping: records={len(msgs)}", disable_notification=True)
+            logger.info("Ping delivered to %s (message_id=%s)", chat_id, getattr(ping, "message_id", None))
+            if not DEBUG_PING_KEEP:
+                async def _del():
+                    await asyncio.sleep(5)
+                    with suppress(Exception):
+                        await bot.delete_message(chat_id, ping.message_id)
+                asyncio.create_task(_del())
+
         dm = registry.bg(
             bot=bot,
-            user_id=user_id,        # <-- ID бота
+            user_id=user_id,
             chat_id=chat_id,
-            stack_id=GROUP_STACK_ID, # <-- общий стек чата
+            stack_id=GROUP_STACK_ID,
             load=True,
         )
-
         await dm.start(
             RecSG.show,
-            data={"idx": 0, "chat_id": chat_id},  # <-- чтобы getter знал ключ
+            data={"idx": 0, "chat_id": chat_id},
             mode=StartMode.RESET_STACK,
-            show_mode=ShowMode.SEND,              # <-- отправляем новое сообщение
+            show_mode=ShowMode.SEND,
         )
         logger.info("Initial push sent to chat %s", chat_id)
+
+        # Прямое подтверждающее сообщение (на время отладки)
+        if FORCE_START_MESSAGE:
+            ok = await bot.send_message(chat_id, f"✅ Диалог отправлен. Сообщений: {len(msgs)}")
+            logger.info("Confirm delivered (message_id=%s)", getattr(ok, "message_id", None))
+
     except Exception:
         logger.exception("Failed to send initial push")
 
@@ -277,21 +319,25 @@ async def on_startup(bot: Bot):
 CHAMP_SPLASHES: dict[str, list[str]] = {}
 
 def load_splash_index() -> None:
-    """Разово читаем index.json в память."""
     global CHAMP_SPLASHES
+    CHAMP_SPLASHES = {}
     try:
-        with open(SPLASH_INDEX_PATH, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        # нормализуем и фильтруем
-        CHAMP_SPLASHES = {
-            str(k): [str(p) for p in v if isinstance(p, str)]
-            for k, v in (data or {}).items()
-            if isinstance(v, list)
-        }
-        logger.info("Splash index: %d champions loaded from %s", len(CHAMP_SPLASHES), SPLASH_INDEX_PATH)
+        data = json.loads(Path(SPLASH_INDEX_PATH).read_text(encoding="utf-8")) or {}
+        fixed = {}
+        for champ, paths in data.items():
+            ok = []
+            for p in paths if isinstance(paths, list) else []:
+                pp = Path(p)
+                if not pp.is_absolute():
+                    pp = SPLASH_DIR / pp.name   # ← та самая «одна строка»
+                if pp.exists() and pp.is_file():
+                    ok.append(str(pp.resolve()))
+            if ok:
+                fixed[str(champ)] = ok
+        CHAMP_SPLASHES = fixed
+        logger.info("Splash index normalized (relative): %d champions", len(CHAMP_SPLASHES))
     except FileNotFoundError:
         logger.warning("Splash index file %s not found; fallback to FS scan.", SPLASH_INDEX_PATH)
-        CHAMP_SPLASHES = {}
     except Exception:
         logger.exception("Failed to load splash index")
         CHAMP_SPLASHES = {}
@@ -303,11 +349,11 @@ def pick_splash(champion: str) -> MediaAttachment | None:
     files = CHAMP_SPLASHES.get(champion)
     if files:
         path = random.choice(files)
-        return MediaAttachment(path=path, type="photo")
+        return MediaAttachment(type=ContentType.PHOTO, path=path)
     # мягкий фолбэк, если индекс не содержит героя
     files2 = list(SPLASH_DIR.glob(f"{champion}_*.jpg")) + list(SPLASH_DIR.glob(f"{champion}_*.png"))
     if files2:
-        return MediaAttachment(path=str(random.choice(files2)), type="photo")
+        return MediaAttachment(type=ContentType.PHOTO, path=str(random.choice(files2)))
     return None
 
 
@@ -339,8 +385,6 @@ def _parse_riot_ids(raw: str) -> list[str]:
 
 RIOT_IDS = _parse_riot_ids(os.getenv("RIOT_IDS", ""))
 
-RIOT_IDS = _parse_riot_ids(os.getenv("RIOT_IDS", ""))
-
 RIOT_BTN_TO_NAME: dict[str, str] = {}
 RIOT_BUTTONS = []
 for i, name in enumerate(RIOT_IDS):
@@ -351,7 +395,7 @@ for i, name in enumerate(RIOT_IDS):
 BACK_BUTTON = Button(Const("↩️ Назад"), id="back", on_click=on_back)
 
 view = Window(
-    DynamicMedia("photo"),
+    DynamicMedia("photo", when=lambda d, *_: d.get("photo") is not None),
     Format("{text}\n\n({pos}/{total})"),
     Row(
         Button(Const("◀"), id="left",
@@ -361,16 +405,8 @@ view = Window(
                on_click=on_right,
                when=lambda d, *_: d.get("show_nav") and not d["disable_right"]),
     ),
-    Row(
-        BACK_BUTTON,
-        when=lambda d, *_: d.get("show_back"),
-    ),
-
-    Group(
-        *RIOT_BUTTONS,
-        width=2,
-        when=lambda d, *_: bool(RIOT_BUTTONS),
-    ),
+    Row(BACK_BUTTON, when=lambda d, *_: d.get("show_back")),
+    Group(*RIOT_BUTTONS, width=2, when=lambda d, *_: bool(RIOT_BUTTONS)),
     getter=getter,
     state=RecSG.show,
 )

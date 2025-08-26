@@ -34,25 +34,6 @@ services:
     networks:
       - trino_network
 
-  dagster:
-    build:
-      context: .
-      dockerfile: Dockerfile_dagster
-    container_name: dagster
-    environment:
-      DAGSTER_HOME: /opt/dagster/dagster_home
-    volumes:
-      - ./dagster_project:/opt/dagster/app
-      - ./dagster_home:/opt/dagster/dagster_home
-    working_dir: /opt/dagster/app
-    command: >
-      bash -c "pip install --no-cache -r requirements.txt &&
-               dagster dev -p 3000 -h 0.0.0.0"
-    ports:
-      - '3000:3000'
-    networks:
-      - trino_network
-
   bot:
     build:
       context: .

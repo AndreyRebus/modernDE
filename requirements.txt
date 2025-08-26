@@ -4,6 +4,7 @@ pandas
 pyarrow
 python-dotenv
 trino
+Pillow>=10.0.0
 
 plotly>=5.20
 kaleido==0.2.1
@@ -13,3 +14,5 @@ requests
 urllib3
 pyiceberg
 pyiceberg[sql-postgres]
+dbt-core==1.8.1
+dbt-trino==1.8.1
