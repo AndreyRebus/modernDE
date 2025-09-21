@@ -69,6 +69,21 @@ jobs:
                 threads: "{{ env_var('DBT_THREADS', 1) | as_number }}"
           YAML
 
+      # === NEW: cache + install dbt packages ===
+      - name: Cache dbt packages
+        uses: actions/cache@v4
+        with:
+          path: lol_dbt_project/dbt_packages
+          key: dbt-packages-${{ runner.os }}-${{ hashFiles('lol_dbt_project/packages.yml') }}
+          restore-keys: |
+            dbt-packages-${{ runner.os }}-
+
+      - name: dbt deps
+        working-directory: lol_dbt_project
+        env: { DBT_PROJECT_DIR: "" }
+        run: dbt --no-use-colors deps --profiles-dir "$DBT_PROFILES_DIR"
+      # ==========================================
+
       - name: dbt parse (no connection)
         working-directory: lol_dbt_project
         env: { DBT_PROJECT_DIR: "" }
@@ -81,11 +96,8 @@ jobs:
           dbt --no-use-colors docs generate \
             --no-compile --empty-catalog --static \
             --profiles-dir "$DBT_PROFILES_DIR"
-          # Гарантируем index.html в корне target
           mv -f target/static_index.html target/index.html
-          # Отключаем Jekyll, на всякий случай
           touch target/.nojekyll
-          # Диагностика
           ls -lah target
           test -f target/index.html || (echo "❌ index.html не создан" && exit 1)
 
