@@ -1,4 +1,4 @@
-name: Build & Publish dbt Docs (lean, fixed dir)
+name: Build & Publish dbt Docs (offline, verified)
 
 on:
   push:
@@ -19,18 +19,17 @@ concurrency:
 
 jobs:
   docs:
-    name: Generate & publish dbt docs
+    name: Generate dbt docs (offline)
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     env:
       DBT_PROFILES_DIR: /home/runner/.dbt
       PIP_DISABLE_PIP_VERSION_CHECK: "1"
 
     steps:
-      - name: Checkout (shallow)
+      - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
+        with: { fetch-depth: 1 }
 
       - name: Create requirements file
         run: |
@@ -39,23 +38,15 @@ jobs:
           dbt-trino==1.8.1
           REQ
 
-      - name: Set up Python with pip cache
+      - name: Setup Python (cache pip)
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: "pip"
           cache-dependency-path: "requirements-dbt.txt"
 
-      - name: Install dbt + adapter
+      - name: Install dbt
         run: pip install -r requirements-dbt.txt -q
-
-      - name: Cache dbt packages
-        uses: actions/cache@v4
-        with:
-          path: lol_dbt_project/dbt_packages
-          key: dbt-packages-${{ runner.os }}-${{ hashFiles('lol_dbt_project/packages.yml') }}
-          restore-keys: |
-            dbt-packages-${{ runner.os }}-
 
       - name: Write profiles.yml
         run: |
@@ -67,42 +58,36 @@ jobs:
               dev:
                 type: trino
                 method: ldap
-                host: "{{ env_var('TRINO_HOST') }}"
+                host: "{{ env_var('TRINO_HOST', 'example.invalid') }}"
                 port: "{{ env_var('TRINO_PORT', 8443) | as_number }}"
-                user: "{{ env_var('TRINO_USER') }}"
-                password: "{{ env_var('TRINO_PASSWORD') }}"
+                user: "{{ env_var('TRINO_USER', 'dummy') }}"
+                password: "{{ env_var('TRINO_PASSWORD', 'dummy') }}"
                 http_scheme: https
                 verify: false
-                database: "{{ env_var('TRINO_CATALOG') }}"
-                schema: "{{ env_var('DBT_SCHEMA') }}"
+                database: "{{ env_var('TRINO_CATALOG', 'dummy') }}"
+                schema: "{{ env_var('DBT_SCHEMA', 'dummy') }}"
                 threads: "{{ env_var('DBT_THREADS', 1) | as_number }}"
           YAML
 
-      - name: dbt deps
+      - name: dbt parse (no connection)
         working-directory: lol_dbt_project
-        env:
-          # на всякий случай глушим внешнее переопределение
-          DBT_PROJECT_DIR: ""
-        run: |
-          dbt --no-use-colors deps \
-            --project-dir . \
-            --profiles-dir "$DBT_PROFILES_DIR"
+        env: { DBT_PROJECT_DIR: "" }
+        run: dbt --no-use-colors parse --profiles-dir "$DBT_PROFILES_DIR"
 
-      - name: dbt docs generate
+      - name: dbt docs generate (offline single-file)
         working-directory: lol_dbt_project
-        env:
-          TRINO_HOST: ${{ secrets.TRINO_HOST }}
-          TRINO_PORT: ${{ secrets.TRINO_PORT }}
-          TRINO_USER: ${{ secrets.TRINO_USER }}
-          TRINO_PASSWORD: ${{ secrets.TRINO_PASSWORD }}
-          TRINO_CATALOG: ${{ secrets.TRINO_CATALOG }}
-          DBT_SCHEMA: ${{ secrets.DBT_SCHEMA }}
-          DBT_THREADS: ${{ secrets.DBT_THREADS || '1' }}
-          DBT_PROJECT_DIR: ""
+        env: { DBT_PROJECT_DIR: "" }
         run: |
           dbt --no-use-colors docs generate \
-            --project-dir . \
+            --no-compile --empty-catalog --static \
             --profiles-dir "$DBT_PROFILES_DIR"
+          # Гарантируем index.html в корне target
+          mv -f target/static_index.html target/index.html
+          # Отключаем Jekyll, на всякий случай
+          touch target/.nojekyll
+          # Диагностика
+          ls -lah target
+          test -f target/index.html || (echo "❌ index.html не создан" && exit 1)
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
@@ -123,3 +108,9 @@ jobs:
       - name: Deploy
         id: deployment
         uses: actions/deploy-pages@v4
+
+      - name: Post URL to Job Summary
+        run: |
+          echo "### ✅ Published dbt docs" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Open: **${{ steps.deployment.outputs.page_url }}**" >> "$GITHUB_STEP_SUMMARY"
