@@ -1,0 +1,123 @@
+name: Build & Publish dbt Docs (lean)
+
+on:
+  push:
+    branches: [ "alternative_main" ]
+    paths:
+      - "models/**"
+      - "macros/**"
+      - "seeds/**"
+      - "snapshots/**"
+      - "analysis/**"
+      - "tests/**"
+      - "dbt_project.yml"
+      - "packages.yml"
+      - ".github/workflows/dbt-docs.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  docs:
+    name: Generate & publish dbt docs
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout (shallow)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      # Создаём requirements для кэшируемой установки pip
+      - name: Create requirements file
+        run: |
+          cat > requirements-dbt.txt <<'REQ'
+          dbt-core==1.8.1
+          dbt-trino==1.8.1
+          REQ
+
+      - name: Set up Python with pip cache
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: "requirements-dbt.txt"
+
+      - name: Install dbt + adapter
+        run: pip install -r requirements-dbt.txt
+
+      # Кэшируем пакеты dbt (dbt_packages/) между запусками
+      - name: Cache dbt packages
+        uses: actions/cache@v4
+        with:
+          path: dbt_packages
+          key: dbt-packages-${{ runner.os }}-${{ hashFiles('packages.yml') }}
+          restore-keys: |
+            dbt-packages-${{ runner.os }}-
+
+      # Создаём profiles.yml на раннере (как было в образе)
+      - name: Write profiles.yml
+        env:
+          DBT_PROFILES_DIR: /home/runner/.dbt
+        run: |
+          mkdir -p "$DBT_PROFILES_DIR"
+          cat > "$DBT_PROFILES_DIR/profiles.yml" <<'YAML'
+          lol_dbt_project:
+            target: dev
+            outputs:
+              dev:
+                type: trino
+                method: ldap
+                host: "{{ env_var('TRINO_HOST') }}"
+                port: "{{ env_var('TRINO_PORT', 8443) | as_number }}"
+                user: "{{ env_var('TRINO_USER') }}"
+                password: "{{ env_var('TRINO_PASSWORD') }}"
+                http_scheme: https
+                verify: false
+                database: "{{ env_var('TRINO_CATALOG') }}"
+                schema: "{{ env_var('DBT_SCHEMA') }}"
+                threads: "{{ env_var('DBT_THREADS', 1) | as_number }}"
+          YAML
+
+      - name: dbt deps (uses cache if unchanged)
+        run: dbt --no-use-colors deps
+
+      - name: dbt docs generate
+        env:
+          TRINO_HOST: ${{ secrets.TRINO_HOST }}
+          TRINO_PORT: ${{ secrets.TRINO_PORT }}
+          TRINO_USER: ${{ secrets.TRINO_USER }}
+          TRINO_PASSWORD: ${{ secrets.TRINO_PASSWORD }}
+          TRINO_CATALOG: ${{ secrets.TRINO_CATALOG }}
+          DBT_SCHEMA: ${{ secrets.DBT_SCHEMA }}
+          DBT_THREADS: ${{ secrets.DBT_THREADS || '1' }}
+          DBT_PROFILES_DIR: /home/runner/.dbt
+        run: dbt --no-use-colors docs generate --profiles-dir "$DBT_PROFILES_DIR"
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload artifact (target/)
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./target
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: docs
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4
