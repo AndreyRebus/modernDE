@@ -1,17 +1,17 @@
-name: Build & Publish dbt Docs (lean)
+name: Build & Publish dbt Docs (lean, auto-detect project dir)
 
 on:
   push:
-    branches: [ "alternative_main" ]
+    branches: [ "main" ]
     paths:
-      - "models/**"
-      - "macros/**"
-      - "seeds/**"
-      - "snapshots/**"
-      - "analysis/**"
-      - "tests/**"
-      - "dbt_project.yml"
-      - "packages.yml"
+      - "**/models/**"
+      - "**/macros/**"
+      - "**/seeds/**"
+      - "**/snapshots/**"
+      - "**/analysis/**"
+      - "**/tests/**"
+      - "**/dbt_project.yml"
+      - "**/packages.yml"
       - ".github/workflows/dbt-docs.yml"
   workflow_dispatch:
 
@@ -29,6 +29,10 @@ jobs:
     name: Generate & publish dbt docs
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      # где сохраним profiles.yml
+      DBT_PROFILES_DIR: /home/runner/.dbt
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
 
     steps:
       - name: Checkout (shallow)
@@ -36,7 +40,6 @@ jobs:
         with:
           fetch-depth: 1
 
-      # Создаём requirements для кэшируемой установки pip
       - name: Create requirements file
         run: |
           cat > requirements-dbt.txt <<'REQ'
@@ -52,21 +55,33 @@ jobs:
           cache-dependency-path: "requirements-dbt.txt"
 
       - name: Install dbt + adapter
-        run: pip install -r requirements-dbt.txt
+        run: pip install -r requirements-dbt.txt -q
 
-      # Кэшируем пакеты dbt (dbt_packages/) между запусками
+      - name: Detect dbt project directory
+        id: detect
+        shell: bash
+        run: |
+          set -euo pipefail
+          CANDIDATE="$(git ls-files | grep -E '(^|.*/)(dbt_project\.yml)$' | head -n1 || true)"
+          if [ -z "$CANDIDATE" ]; then
+            echo "❌ dbt_project.yml not found in repo." >&2
+            exit 1
+          fi
+          DIR="$(dirname "$CANDIDATE")"
+          if [ "$DIR" = "." ]; then DIR="."; fi
+          echo "DBT_PROJECT_DIR=$DIR" >> "$GITHUB_ENV"
+          echo "dir=$DIR" >> "$GITHUB_OUTPUT"
+          echo "Detected dbt project dir: $DIR"
+
       - name: Cache dbt packages
         uses: actions/cache@v4
         with:
-          path: dbt_packages
-          key: dbt-packages-${{ runner.os }}-${{ hashFiles('packages.yml') }}
+          path: ${{ env.DBT_PROJECT_DIR }}/dbt_packages
+          key: dbt-packages-${{ runner.os }}-${{ hashFiles(format('{0}/packages.yml', env.DBT_PROJECT_DIR)) }}
           restore-keys: |
             dbt-packages-${{ runner.os }}-
 
-      # Создаём profiles.yml на раннере (как было в образе)
       - name: Write profiles.yml
-        env:
-          DBT_PROFILES_DIR: /home/runner/.dbt
         run: |
           mkdir -p "$DBT_PROFILES_DIR"
           cat > "$DBT_PROFILES_DIR/profiles.yml" <<'YAML'
@@ -87,10 +102,12 @@ jobs:
                 threads: "{{ env_var('DBT_THREADS', 1) | as_number }}"
           YAML
 
-      - name: dbt deps (uses cache if unchanged)
+      - name: dbt deps
+        working-directory: ${{ env.DBT_PROJECT_DIR }}
         run: dbt --no-use-colors deps
 
       - name: dbt docs generate
+        working-directory: ${{ env.DBT_PROJECT_DIR }}
         env:
           TRINO_HOST: ${{ secrets.TRINO_HOST }}
           TRINO_PORT: ${{ secrets.TRINO_PORT }}
@@ -99,7 +116,6 @@ jobs:
           TRINO_CATALOG: ${{ secrets.TRINO_CATALOG }}
           DBT_SCHEMA: ${{ secrets.DBT_SCHEMA }}
           DBT_THREADS: ${{ secrets.DBT_THREADS || '1' }}
-          DBT_PROFILES_DIR: /home/runner/.dbt
         run: dbt --no-use-colors docs generate --profiles-dir "$DBT_PROFILES_DIR"
 
       - name: Configure Pages
@@ -108,7 +124,7 @@ jobs:
       - name: Upload artifact (target/)
         uses: actions/upload-pages-artifact@v3
         with:
-          path: ./target
+          path: ${{ env.DBT_PROJECT_DIR }}/target
 
   deploy:
     name: Deploy to GitHub Pages
