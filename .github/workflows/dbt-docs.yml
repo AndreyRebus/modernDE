@@ -1,17 +1,10 @@
-name: Build & Publish dbt Docs (lean, auto-detect project dir)
+name: Build & Publish dbt Docs (lean, fixed dir)
 
 on:
   push:
     branches: [ "alternative_main" ]
     paths:
-      - "**/models/**"
-      - "**/macros/**"
-      - "**/seeds/**"
-      - "**/snapshots/**"
-      - "**/analysis/**"
-      - "**/tests/**"
-      - "**/dbt_project.yml"
-      - "**/packages.yml"
+      - "lol_dbt_project/**"
       - ".github/workflows/dbt-docs.yml"
   workflow_dispatch:
 
@@ -30,7 +23,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      # где сохраним profiles.yml
       DBT_PROFILES_DIR: /home/runner/.dbt
       PIP_DISABLE_PIP_VERSION_CHECK: "1"
 
@@ -57,27 +49,11 @@ jobs:
       - name: Install dbt + adapter
         run: pip install -r requirements-dbt.txt -q
 
-      - name: Detect dbt project directory
-        id: detect
-        shell: bash
-        run: |
-          set -euo pipefail
-          CANDIDATE="$(git ls-files | grep -E '(^|.*/)(dbt_project\.yml)$' | head -n1 || true)"
-          if [ -z "$CANDIDATE" ]; then
-            echo "❌ dbt_project.yml not found in repo." >&2
-            exit 1
-          fi
-          DIR="$(dirname "$CANDIDATE")"
-          if [ "$DIR" = "." ]; then DIR="."; fi
-          echo "DBT_PROJECT_DIR=$DIR" >> "$GITHUB_ENV"
-          echo "dir=$DIR" >> "$GITHUB_OUTPUT"
-          echo "Detected dbt project dir: $DIR"
-
       - name: Cache dbt packages
         uses: actions/cache@v4
         with:
-          path: ${{ env.DBT_PROJECT_DIR }}/dbt_packages
-          key: dbt-packages-${{ runner.os }}-${{ hashFiles(format('{0}/packages.yml', env.DBT_PROJECT_DIR)) }}
+          path: lol_dbt_project/dbt_packages
+          key: dbt-packages-${{ runner.os }}-${{ hashFiles('lol_dbt_project/packages.yml') }}
           restore-keys: |
             dbt-packages-${{ runner.os }}-
 
@@ -103,11 +79,17 @@ jobs:
           YAML
 
       - name: dbt deps
-        working-directory: ${{ env.DBT_PROJECT_DIR }}
-        run: dbt --no-use-colors deps
+        working-directory: lol_dbt_project
+        env:
+          # на всякий случай глушим внешнее переопределение
+          DBT_PROJECT_DIR: ""
+        run: |
+          dbt --no-use-colors deps \
+            --project-dir . \
+            --profiles-dir "$DBT_PROFILES_DIR"
 
       - name: dbt docs generate
-        working-directory: ${{ env.DBT_PROJECT_DIR }}
+        working-directory: lol_dbt_project
         env:
           TRINO_HOST: ${{ secrets.TRINO_HOST }}
           TRINO_PORT: ${{ secrets.TRINO_PORT }}
@@ -116,7 +98,11 @@ jobs:
           TRINO_CATALOG: ${{ secrets.TRINO_CATALOG }}
           DBT_SCHEMA: ${{ secrets.DBT_SCHEMA }}
           DBT_THREADS: ${{ secrets.DBT_THREADS || '1' }}
-        run: dbt --no-use-colors docs generate --profiles-dir "$DBT_PROFILES_DIR"
+          DBT_PROJECT_DIR: ""
+        run: |
+          dbt --no-use-colors docs generate \
+            --project-dir . \
+            --profiles-dir "$DBT_PROFILES_DIR"
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
@@ -124,7 +110,7 @@ jobs:
       - name: Upload artifact (target/)
         uses: actions/upload-pages-artifact@v3
         with:
-          path: ${{ env.DBT_PROJECT_DIR }}/target
+          path: lol_dbt_project/target
 
   deploy:
     name: Deploy to GitHub Pages
