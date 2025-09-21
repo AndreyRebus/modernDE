@@ -2,7 +2,7 @@ name: Build & Publish dbt Docs (lean, auto-detect project dir)
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "alternative_main" ]
     paths:
       - "**/models/**"
       - "**/macros/**"
