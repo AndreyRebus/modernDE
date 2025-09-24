@@ -310,3 +310,48 @@ sources:
       description: Количество установленных вардов
     - name: participant.win
       description: Победа (true/false)
+
+
+
+models:
+  - name: avg_kda
+    description: >
+      Аггрегированная недельная сводка по KDA для заданного набора Riot ID за 5 последних недель:
+      по каждой неделе выдаёт количество матчей, средний KDA по матчам и общий (суммарный) KDA.
+      Колонки: nickname, week_label, matches, avg_kda_per_match, kda_overall.
+
+  - name: 2pilka_record
+    description: >
+      Ежедневные рекорды метрик для игрока 2pilka#RU1 за текущую дату. Для каждого показателя
+      выводится пара колонок: <metric> и <metric>_meta (matchId-_-championName) при побитии
+      исторического значения за ~последние 30 дней, иначе NULL. Дополнительно есть source_nickname.
+
+  - name: breakthesilence_record
+    description: >
+      Ежедневные рекорды метрик для игрока Breaksthesilence#RU1 за текущую дату, в том же формате,
+      что и прочие *_record: пары <metric>/<metric>_meta при новом рекорде и колонка source_nickname.
+
+  - name: gruntq_record
+    description: >
+      Ежедневные рекорды метрик для игрока Gruntq#RU1 за текущую дату (пары <metric>/<metric>_meta
+      при новом рекорде) плюс source_nickname.
+
+  - name: monty_record
+    description: >
+      Ежедневные рекорды метрик для игрока Monty Gard#RU1 за текущую дату (пары <metric>/<metric>_meta
+      при новом рекорде) плюс source_nickname.
+
+  - name: prooaknor_record
+    description: >
+      Ежедневные рекорды метрик для игрока Prooaknor#RU1 за текущую дату (пары <metric>/<metric>_meta
+      при новом рекорде) плюс source_nickname.
+
+  - name: shazam_record
+    description: >
+      Ежедневные рекорды метрик для игрока Шaзам#RU1 за текущую дату (пары <metric>/<metric>_meta
+      при новом рекорде) плюс source_nickname.
+
+  - name: concat_record
+    description: >
+      UNION ALL объединение всех *_record моделей (2pilka, Breaksthesilence, Gruntq, Monty Gard,
+      Prooaknor, Шaзам) за текущую дату. Набор колонок совпадает с индивидуальными моделями *_record.
